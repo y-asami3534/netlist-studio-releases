@@ -1,0 +1,41 @@
+{
+  "schema": "netlist-studio.release-manifest",
+  "schemaVersion": 2,
+  "version": "0.39.23",
+  "source": {
+    "repository": "y-asami3534/netlist-studio",
+    "commit": "41e6511ec6ac22648c9df5f585b947da06fea828",
+    "tag": "v0.39.23",
+    "tagObject": "7a8217993a7c426c61d1b4c92a7964f41771c67a"
+  },
+  "artifacts": [
+    {
+      "name": "Netlist-Studio-0.39.23-arm64.dmg",
+      "sha256": "2e588184354d30e6f3f85ae4dc1543e66db5b5aa8b5e50964b688b6c4f6cf3e0",
+      "size": 183289953
+    },
+    {
+      "name": "Netlist-Studio-0.39.23-arm64.zip",
+      "sha256": "eb8cdf7c703d51f616f2669a1bdc64434c73c45332b9b4abd464d4ca531713f1",
+      "size": 176767009
+    }
+  ],
+  "evidence": {
+    "name": "release-evidence.json",
+    "sha256": "1c865bc49f44c25df42337a97672aad0a1aeed13af9de0724b6bc1b04d7b289f",
+    "size": 1932
+  },
+  "approval": {
+    "releaseOwner": "浅見悠介",
+    "githubId": 50958596,
+    "approved": true,
+    "confirmation": "RELEASE OWNER APPROVE v0.39.23",
+    "signingKeyFingerprint": "SHA256:byJQrGJp2En8bA2tWQcD73wnEnJRGjSz7tpRwoJWA4w",
+    "evidence": {
+      "repository": "y-asami3534/netlist-studio",
+      "commit": "2eda58568913bc748b8930e66baf0ad0647efd9b",
+      "path": "reports/20260729_0128_v0.39.23_正式候補・人手妥当性確認・公開承認_リリースレポート.md",
+      "sha256": "47dbbb5a7a2a44e0d2869fe9561dcfa3294c61956e27e528be1c7b5816f2b484"
+    }
+  }
+}
