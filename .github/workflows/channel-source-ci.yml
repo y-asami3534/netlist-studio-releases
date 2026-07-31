@@ -1,0 +1,72 @@
+name: macOS stable channel source data
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+permissions:
+  contents: read
+
+jobs:
+  channel-data:
+    name: channel-data
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the pull request base policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Select the pinned Node.js runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.18.0
+          check-latest: false
+      - name: Validate candidate Git data
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          NS_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          NS_PR_NUMBER: ${{ github.event.pull_request.number }}
+          NS_REPOSITORY: y-asami3534/netlist-studio-releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="${RUNNER_TEMP}/channel-data-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -- "${evidence_dir}"
+          node .secure-ci-cd/policy-cli.mjs validate-pipeline \
+            --root "${GITHUB_WORKSPACE}" \
+            --contract "${GITHUB_WORKSPACE}/pipeline.contract.json" \
+            --policy "${GITHUB_WORKSPACE}/channel-policy.json"
+          node .secure-ci-cd/policy-cli.mjs validate-change \
+            --github \
+            --repository "${NS_REPOSITORY}" \
+            --pr-number "${NS_PR_NUMBER}" \
+            --base-sha "${NS_BASE_SHA}" \
+            --head-sha "${NS_HEAD_SHA}" \
+            --contract "${GITHUB_WORKSPACE}/pipeline.contract.json" \
+            --policy "${GITHUB_WORKSPACE}/channel-policy.json" \
+            --output "${evidence_dir}/validation.json"
+          node .secure-ci-cd/policy-cli.mjs write-source-evidence \
+            --repository "${NS_REPOSITORY}" \
+            --workflow-path ".github/workflows/channel-source-ci.yml" \
+            --base-sha "${NS_BASE_SHA}" \
+            --head-sha "${NS_HEAD_SHA}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --attempt "${GITHUB_RUN_ATTEMPT}" \
+            --contract "${GITHUB_WORKSPACE}/pipeline.contract.json" \
+            --policy "${GITHUB_WORKSPACE}/channel-policy.json" \
+            --validation-result "${evidence_dir}/validation.json" \
+            --output "${evidence_dir}/source-evidence.json"
+      - name: Publish the source evidence receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: channel-data-evidence-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/channel-data-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 30
