@@ -1,0 +1,57 @@
+{
+  "exceptionId": "personal-repository-no-required-workflow-v1",
+  "repository": {
+    "branch": "main",
+    "fullName": "y-asami3534/netlist-studio-releases",
+    "id": 1280945456
+  },
+  "rollbackSnapshot": {
+    "sha256": "264ab5d54181969b646a6ecddd338375f6d6a04d868455843736bac0effb68c0",
+    "storage": "external-ephemeral"
+  },
+  "schema": "netlist-studio.provider-policy-request",
+  "schemaVersion": 1,
+  "target": {
+    "actions": {
+      "allowedActions": "all",
+      "enabled": true,
+      "shaPinningRequired": true
+    },
+    "branch": "main",
+    "merge": {
+      "allowAutoMerge": false,
+      "allowMergeCommit": true,
+      "allowRebaseMerge": false,
+      "allowSquashMerge": false,
+      "deleteBranchOnMerge": true
+    },
+    "ruleset": {
+      "allowBypass": false,
+      "allowDeletion": false,
+      "allowForcePush": false,
+      "conversationResolutionRequired": true,
+      "enforcement": "active",
+      "mergeMethods": [
+        "merge"
+      ],
+      "name": "protect-main",
+      "requiredApprovals": 0,
+      "requiredChecks": [
+        {
+          "context": "channel-data",
+          "integrationId": 15368
+        },
+        {
+          "context": "trusted-policy",
+          "integrationId": 15368
+        }
+      ],
+      "requiredSignatures": true,
+      "strictRequiredChecks": true
+    },
+    "workflow": {
+      "canApprovePullRequestReviews": false,
+      "defaultWorkflowPermissions": "read"
+    }
+  }
+}
