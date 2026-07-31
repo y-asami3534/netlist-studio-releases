@@ -8,11 +8,7 @@ on:
       - synchronize
       - ready_for_review
 
-permissions:
-  actions: read
-  contents: read
-  pull-requests: read
-  statuses: write
+permissions: {}
 
 concurrency:
   group: trusted-policy-${{ github.event.pull_request.number }}
@@ -21,6 +17,11 @@ concurrency:
 jobs:
   initialize-trusted-status:
     name: initialize-trusted-status
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: write
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -45,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node .secure-ci-cd/policy-cli.mjs verify-trusted-publication \
+          node .secure-ci-cd/policy-cli.mjs publish-trusted-status \
             --github \
             --repository "${NS_REPOSITORY}" \
             --workflow-path ".github/workflows/channel-trusted-policy.yml" \
@@ -53,11 +54,7 @@ jobs:
             --base-sha "${NS_BASE_SHA}" \
             --head-sha "${NS_HEAD_SHA}" \
             --run-id "${GITHUB_RUN_ID}" \
-            --attempt "${GITHUB_RUN_ATTEMPT}"
-          node .secure-ci-cd/policy-cli.mjs set-status \
-            --github \
-            --repository "${NS_REPOSITORY}" \
-            --sha "${NS_HEAD_SHA}" \
+            --attempt "${GITHUB_RUN_ATTEMPT}" \
             --state pending \
             --context trusted-policy \
             --description "default branch policy validation is running" \
@@ -67,6 +64,8 @@ jobs:
     name: validate-candidate-data
     needs:
       - initialize-trusted-status
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -112,6 +111,11 @@ jobs:
     needs:
       - initialize-trusted-status
       - validate-candidate-data
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: write
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -144,7 +148,7 @@ jobs:
             final_state=success
             final_description="default branch policy validation passed"
           fi
-          node .secure-ci-cd/policy-cli.mjs verify-trusted-publication \
+          node .secure-ci-cd/policy-cli.mjs publish-trusted-status \
             --github \
             --repository "${NS_REPOSITORY}" \
             --workflow-path ".github/workflows/channel-trusted-policy.yml" \
@@ -152,11 +156,7 @@ jobs:
             --base-sha "${NS_BASE_SHA}" \
             --head-sha "${NS_HEAD_SHA}" \
             --run-id "${GITHUB_RUN_ID}" \
-            --attempt "${GITHUB_RUN_ATTEMPT}"
-          node .secure-ci-cd/policy-cli.mjs set-status \
-            --github \
-            --repository "${NS_REPOSITORY}" \
-            --sha "${NS_HEAD_SHA}" \
+            --attempt "${GITHUB_RUN_ATTEMPT}" \
             --state "${final_state}" \
             --context trusted-policy \
             --description "${final_description}" \
