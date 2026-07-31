@@ -34,6 +34,21 @@ function newest(runs) {
   return [...runs].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)) || (BigInt(right.id) > BigInt(left.id) ? 1 : -1))[0];
 }
 
+function validateStatusInput(input) {
+  if (!FULL_SHA.test(input.headSha ?? "") || !["pending", "success", "failure"].includes(input.state) || input.context !== "trusted-policy" || typeof input.description !== "string" || input.description.length === 0 || input.description.length > 140 || typeof input.targetUrl !== "string" || !/^https:\/\/github\.com\//u.test(input.targetUrl)) {
+    throw new EvidenceUnavailable("trusted status arguments are invalid");
+  }
+  return input;
+}
+
+export function validateStatusResponse(response, input) {
+  const expectedUrl = `https://api.github.com/repos/${input.repository}/statuses/${input.headSha}`;
+  if (response?.url !== expectedUrl || response?.context !== input.context || response?.state !== input.state || response?.target_url !== input.targetUrl) {
+    throw new PolicyViolation("GitHub status response binding changed");
+  }
+  return Object.freeze({ context: response.context, creatorId: response.creator?.id ?? null, sha: input.headSha, state: response.state, targetUrl: response.target_url });
+}
+
 export function validatePublicationSnapshot(snapshot, input) {
   const args = {
     ...input,
@@ -55,10 +70,10 @@ export function validatePublicationSnapshot(snapshot, input) {
   return Object.freeze({ attempt: args.attempt, baseSha: args.baseSha, headSha: args.headSha, prNumber: args.prNumber, repository: args.repository, runId: args.runId, status: "PASS", workflowPath: args.workflowPath });
 }
 
-async function collectPages(endpoint, key) {
+async function collectPages(endpoint, key, request = githubRequest) {
   const values = [];
   for (let page = 1; page <= 10; page += 1) {
-    const payload = await githubRequest(`${endpoint}${endpoint.includes("?") ? "&" : "?"}per_page=100&page=${page}`);
+    const payload = await request(`${endpoint}${endpoint.includes("?") ? "&" : "?"}per_page=100&page=${page}`);
     if (!Array.isArray(payload?.[key])) throw new EvidenceUnavailable(`GitHub response is missing ${key}`);
     values.push(...payload[key]);
     if (payload[key].length < 100) return values;
@@ -66,15 +81,15 @@ async function collectPages(endpoint, key) {
   throw new EvidenceUnavailable("GitHub run inventory exceeds 1000 entries");
 }
 
-export async function collectAndValidatePublication(input) {
+export async function collectAndValidatePublication(input, request = githubRequest) {
   const repositoryPath = input.repository.split("/").map(encodeURIComponent).join("/");
   const [repository, pr, rawRun] = await Promise.all([
-    githubRequest(`/repos/${repositoryPath}`),
-    githubRequest(`/repos/${repositoryPath}/pulls/${encodeURIComponent(input.prNumber)}`),
-    githubRequest(`/repos/${repositoryPath}/actions/runs/${encodeURIComponent(input.runId)}`),
+    request(`/repos/${repositoryPath}`),
+    request(`/repos/${repositoryPath}/pulls/${encodeURIComponent(input.prNumber)}`),
+    request(`/repos/${repositoryPath}/actions/runs/${encodeURIComponent(input.runId)}`),
   ]);
-  const workflow = await githubRequest(`/repos/${repositoryPath}/actions/workflows/${encodeURIComponent(rawRun.workflow_id)}`);
-  const workflowRuns = await collectPages(`/repos/${repositoryPath}/actions/workflows/${encodeURIComponent(rawRun.workflow_id)}/runs?event=pull_request_target`, "workflow_runs");
+  const workflow = await request(`/repos/${repositoryPath}/actions/workflows/${encodeURIComponent(rawRun.workflow_id)}`);
+  const workflowRuns = await collectPages(`/repos/${repositoryPath}/actions/workflows/${encodeURIComponent(rawRun.workflow_id)}/runs?event=pull_request_target`, "workflow_runs", request);
   return validatePublicationSnapshot({
     pr: { baseSha: pr.base?.sha, headRepository: pr.head?.repo?.full_name, headSha: pr.head?.sha, number: String(pr.number), state: pr.state },
     repository: { fullName: repository.full_name },
@@ -82,4 +97,45 @@ export async function collectAndValidatePublication(input) {
     workflow: { id: String(workflow.id), path: workflow.path },
     workflowRuns: workflowRuns.map(normalizeRun),
   }, input);
+}
+
+export async function createTrustedStatus(input, request = githubRequest) {
+  validateStatusInput(input);
+  const repositoryPath = input.repository.split("/").map(encodeURIComponent).join("/");
+  return request(`/repos/${repositoryPath}/statuses/${input.headSha}`, {
+    method: "POST",
+    body: {
+      context: input.context,
+      description: input.description,
+      state: input.state,
+      target_url: input.targetUrl,
+    },
+  });
+}
+
+export async function publishTrustedStatus(input, dependencies = {}) {
+  validateStatusInput(input);
+  const collect = dependencies.collect ?? collectAndValidatePublication;
+  const createStatus = dependencies.createStatus ?? createTrustedStatus;
+  await collect(input);
+  try {
+    const response = await createStatus(input);
+    const status = validateStatusResponse(response, input);
+    await collect(input);
+    return Object.freeze({ ...status, publication: "PASS" });
+  } catch (error) {
+    if (input.state === "success") {
+      const failure = {
+        ...input,
+        description: "trusted publication became stale",
+        state: "failure",
+      };
+      try {
+        validateStatusResponse(await createStatus(failure), failure);
+      } catch {
+        throw new EvidenceUnavailable("stale trusted success could not be invalidated");
+      }
+    }
+    throw error;
+  }
 }

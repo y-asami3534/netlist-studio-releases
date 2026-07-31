@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -16,12 +16,19 @@ import {
   parseJsonStrict,
   readRepositorySnapshot,
   validateConfiguration,
+  validateChange,
   validateProviderFiles,
+  validatePolicyMaintenance,
   validateReleaseManifestUpdate,
   validateRemoteReleaseSnapshot,
   validateStableChannelSnapshot,
+  validateWorkflowText,
 } from "../.secure-ci-cd/policy-lib.mjs";
-import { validatePublicationSnapshot } from "../.secure-ci-cd/verify-trusted-publication.mjs";
+import {
+  publishTrustedStatus,
+  validatePublicationSnapshot,
+  validateStatusResponse,
+} from "../.secure-ci-cd/verify-trusted-publication.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const contract = parseJsonStrict(await (await import("node:fs/promises")).readFile(path.join(repositoryRoot, "pipeline.contract.json"), "utf8"));
@@ -89,6 +96,53 @@ function binding({ version = "0.40.0", previousVersion = "0.39.23" } = {}) {
 
 function snapshot(entries) {
   return { files: new Map(Object.entries(entries).map(([name, value]) => [name, Buffer.from(value)])) };
+}
+
+function cloneSnapshot(value) {
+  return { files: new Map([...value.files].map(([name, bytes]) => [name, Buffer.from(bytes)])) };
+}
+
+function publicationFixture() {
+  const args = {
+    attempt: "1",
+    baseSha: "1".repeat(40),
+    context: "trusted-policy",
+    description: "default branch policy validation passed",
+    headSha: "2".repeat(40),
+    prNumber: "7",
+    repository: "y-asami3534/netlist-studio-releases",
+    runId: "10",
+    state: "success",
+    targetUrl: "https://github.com/y-asami3534/netlist-studio-releases/actions/runs/10/attempts/1",
+    workflowPath: ".github/workflows/channel-trusted-policy.yml",
+  };
+  const boundRun = {
+    attempt: args.attempt,
+    createdAt: "2026-07-31T00:00:00Z",
+    event: "pull_request_target",
+    id: args.runId,
+    pulls: [{ baseSha: args.baseSha, headSha: args.headSha, number: args.prNumber }],
+    workflowId: "99",
+  };
+  const snapshotValue = {
+    pr: { baseSha: args.baseSha, headRepository: args.repository, headSha: args.headSha, number: args.prNumber, state: "open" },
+    repository: { fullName: args.repository },
+    run: boundRun,
+    workflow: { id: "99", path: args.workflowPath },
+    workflowRuns: [boundRun],
+  };
+  return { args, boundRun, snapshotValue };
+}
+
+function statusResponse(input, overrides = {}) {
+  return {
+    context: input.context,
+    creator: { id: 15368 },
+    state: input.state,
+    target_url: input.targetUrl,
+    url: `https://api.github.com/repos/${input.repository}/statuses/${input.headSha}`,
+    ...overrides,
+  };
 }
 
 function releaseTagMessage(value, manifest) {
@@ -176,12 +230,13 @@ test("strict JSON rejects duplicate keys and canonical JSON is deterministic", (
   assert.equal(canonicalJson({ z: 1, a: { y: 2, b: 3 } }), '{\n  "a": {\n    "b": 3,\n    "y": 2\n  },\n  "z": 1\n}\n');
 });
 
-test("change classifier permits the one-time exact bootstrap and exact provider class only", () => {
+test("change classifier permits bootstrap, exact data classes, and isolated policy maintenance", () => {
   assert.equal(classifyChangedPaths(policy.bootstrap.requiredPaths, { baseHasPolicy: false, baseSha: policy.bootstrap.baseCommit, policy }), "policy-bootstrap");
   assert.throws(() => classifyChangedPaths(policy.bootstrap.requiredPaths, { baseHasPolicy: false, baseSha: "0".repeat(40), policy }), /bootstrap base commit/u);
   assert.equal(classifyChangedPaths(policy.changeClasses["provider-policy"], { baseHasPolicy: true, baseSha: policy.bootstrap.baseCommit, policy }), "provider-policy");
-  assert.throws(() => classifyChangedPaths(["pipeline.contract.json"], { baseHasPolicy: true, baseSha: policy.bootstrap.baseCommit, policy }), /immutable after bootstrap/u);
+  assert.equal(classifyChangedPaths(["pipeline.contract.json"], { baseHasPolicy: true, baseSha: policy.bootstrap.baseCommit, policy }), "policy-maintenance");
   assert.throws(() => classifyChangedPaths(["release-manifest.json", ...policy.changeClasses["stable-channel"]], { baseHasPolicy: true, baseSha: policy.bootstrap.baseCommit, policy }), /mixed or incomplete/u);
+  assert.throws(() => classifyChangedPaths(["SECURITY.md", "release-manifest.json"], { baseHasPolicy: true, baseSha: policy.bootstrap.baseCommit, policy }), /mixed or incomplete/u);
 });
 
 test("repository snapshot rejects unknown, symlink, and oversized entries", async () => {
@@ -200,6 +255,96 @@ test("repository snapshot rejects unknown, symlink, and oversized entries", asyn
   roots.push(oversizedRoot);
   await writeFile(path.join(oversizedRoot, "README.md"), "x".repeat(9));
   await assert.rejects(readRepositorySnapshot(oversizedRoot, { ...policy, limits: { ...policy.limits, maximumFileBytes: 8 } }), /oversized/u);
+});
+
+test("policy maintenance validates candidate policy as data without mixing release content", async () => {
+  const base = await readRepositorySnapshot(repositoryRoot, policy);
+  const candidate = cloneSnapshot(base);
+  candidate.files.set("SECURITY.md", Buffer.concat([candidate.files.get("SECURITY.md"), Buffer.from("\n") ]));
+  const result = await validateChange({ base, candidate, baseSha: "a".repeat(40), contract, policy });
+  assert.equal(result.classification, "policy-maintenance");
+  assert.equal(result.details.classification, "policy-maintenance");
+  assert.equal(validatePolicyMaintenance({ candidate, contract, policy }).classification, "policy-maintenance");
+
+  const mixed = cloneSnapshot(candidate);
+  mixed.files.set("release-manifest.json", Buffer.from(`${JSON.stringify(releaseManifest("0.40.1"), null, 2)}\n`));
+  await assert.rejects(validateChange({ base, candidate: mixed, baseSha: "a".repeat(40), contract, policy }), /mixed or incomplete/u);
+});
+
+test("policy maintenance rejects missing protected files and self-expanded boundaries", async () => {
+  const base = await readRepositorySnapshot(repositoryRoot, policy);
+  const missing = cloneSnapshot(base);
+  missing.files.delete(".secure-ci-cd/policy-cli.mjs");
+  await assert.rejects(validateChange({ base, candidate: missing, baseSha: "a".repeat(40), contract, policy }), /missing protected path/u);
+
+  const expanded = cloneSnapshot(base);
+  const expandedPolicy = structuredClone(policy);
+  expandedPolicy.changeClasses["policy-maintenance"].push("untrusted.mjs");
+  expanded.files.set("channel-policy.json", Buffer.from(canonicalJson(expandedPolicy)));
+  await assert.rejects(validateChange({ base, candidate: expanded, baseSha: "a".repeat(40), contract, policy }), /path set|protected path boundary/u);
+});
+
+test("policy maintenance cannot authorize candidate-selected Action SHAs", async () => {
+  const base = await readRepositorySnapshot(repositoryRoot, policy);
+  const candidate = cloneSnapshot(base);
+  const candidateContract = structuredClone(contract);
+  const previousSha = candidateContract.toolchain.actions.checkout.commitSha;
+  const candidateSha = "f".repeat(40);
+  candidateContract.toolchain.actions.checkout.commitSha = candidateSha;
+  candidate.files.set("pipeline.contract.json", Buffer.from(canonicalJson(candidateContract)));
+  for (const relativePath of [
+    ".github/workflows/channel-promotion-evidence.yml",
+    ".github/workflows/channel-source-ci.yml",
+    ".github/workflows/channel-trusted-policy.yml",
+  ]) {
+    const workflow = candidate.files.get(relativePath).toString("utf8").replaceAll(previousSha, candidateSha);
+    candidate.files.set(relativePath, Buffer.from(workflow));
+  }
+  await assert.rejects(validateChange({ base, candidate, baseSha: "a".repeat(40), contract, policy }), /authority-bearing configuration/u);
+});
+
+test("trusted workflow permissions keep candidate validation read-only", async () => {
+  const workflowPath = path.join(repositoryRoot, ".github/workflows/channel-trusted-policy.yml");
+  const text = await readFile(workflowPath, "utf8");
+  assert.doesNotThrow(() => validateWorkflowText(text, "trusted-policy", contract));
+
+  const workflowWrite = text.replace("permissions: {}", "permissions:\n  statuses: write");
+  assert.throws(() => validateWorkflowText(workflowWrite, "trusted-policy", contract), /permission scopes|least-privilege/u);
+
+  const validatorWrite = text.replace("  validate-candidate-data:\n    name: validate-candidate-data\n    needs:\n      - initialize-trusted-status\n    permissions:\n      contents: read", "  validate-candidate-data:\n    name: validate-candidate-data\n    needs:\n      - initialize-trusted-status\n    permissions:\n      contents: read\n      statuses: write");
+  assert.notEqual(validatorWrite, text);
+  assert.throws(() => validateWorkflowText(validatorWrite, "trusted-policy", contract), /validator permissions/u);
+
+  const missingPublisherRead = text.replace("  publish-trusted-status:\n    name: publish-trusted-status\n    if: ${{ always() }}\n    needs:\n      - initialize-trusted-status\n      - validate-candidate-data\n    permissions:\n      actions: read", "  publish-trusted-status:\n    name: publish-trusted-status\n    if: ${{ always() }}\n    needs:\n      - initialize-trusted-status\n      - validate-candidate-data\n    permissions:");
+  assert.notEqual(missingPublisherRead, text);
+  assert.throws(() => validateWorkflowText(missingPublisherRead, "trusted-policy", contract), /publisher permissions|permissions block/u);
+
+  const base = await readRepositorySnapshot(repositoryRoot, policy);
+  const candidate = cloneSnapshot(base);
+  candidate.files.set(".github/workflows/channel-trusted-policy.yml", Buffer.from(validatorWrite));
+  await assert.rejects(validateChange({ base, candidate, baseSha: "a".repeat(40), contract, policy }), /validator permissions/u);
+});
+
+test("trusted final status decision is exact and rejects fail-open workflow edits", async () => {
+  const workflowPath = path.join(repositoryRoot, ".github/workflows/channel-trusted-policy.yml");
+  const text = await readFile(workflowPath, "utf8");
+  assert.doesNotThrow(() => validateWorkflowText(text, "trusted-policy", contract));
+
+  const mutations = [
+    text.replace('if [[ "${NS_INITIALIZE_RESULT}" == "success" && "${NS_VALIDATION_RESULT}" == "success" ]]; then', "if true; then"),
+    text.replace("          fi\n          node .secure-ci-cd/policy-cli.mjs publish-trusted-status \\", "          fi\n          final_state=success\n          node .secure-ci-cd/policy-cli.mjs publish-trusted-status \\"),
+    text.replace('          [[ "${final_state}" == "success" ]]', ""),
+    text.replace("          NS_VALIDATION_RESULT: ${{ needs.validate-candidate-data.result }}", "          NS_VALIDATION_RESULT: success"),
+  ];
+  for (const candidateText of mutations) {
+    assert.notEqual(candidateText, text);
+    assert.throws(() => validateWorkflowText(candidateText, "trusted-policy", contract), /trusted final status/u);
+  }
+
+  const base = await readRepositorySnapshot(repositoryRoot, policy);
+  const candidate = cloneSnapshot(base);
+  candidate.files.set(".github/workflows/channel-trusted-policy.yml", Buffer.from(mutations[0]));
+  await assert.rejects(validateChange({ base, candidate, baseSha: "a".repeat(40), contract, policy }), /trusted final status/u);
 });
 
 test("initial channel accepts the exact pair and rejects metadata, URL, key, and version drift", () => {
@@ -290,13 +435,88 @@ test("remote release evidence binds immutable release assets and byte-identical 
   assert.throws(() => validateRemoteReleaseSnapshot({ binding: value, candidateManifestBytes: manifestBytes, policy, snapshot: unsigned }), /verified annotated tag/u);
 });
 
-test("trusted publication rejects a stale successful run", () => {
-  const args = { repository: "y-asami3534/netlist-studio-releases", workflowPath: ".github/workflows/channel-trusted-policy.yml", prNumber: "7", baseSha: "1".repeat(40), headSha: "2".repeat(40), runId: "10", attempt: "1" };
-  const boundRun = { id: "10", attempt: "1", event: "pull_request_target", workflowId: "99", createdAt: "2026-07-31T00:00:00Z", pulls: [{ number: "7", baseSha: args.baseSha, headSha: args.headSha }] };
-  const snapshotValue = { repository: { fullName: args.repository }, pr: { number: "7", state: "open", baseSha: args.baseSha, headSha: args.headSha, headRepository: args.repository }, workflow: { id: "99", path: args.workflowPath }, run: boundRun, workflowRuns: [boundRun] };
-  assert.equal(validatePublicationSnapshot(snapshotValue, args).status, "PASS");
-  snapshotValue.workflowRuns.push({ ...boundRun, id: "11", createdAt: "2026-07-31T00:01:00Z" });
-  assert.throws(() => validatePublicationSnapshot(snapshotValue, args), /superseded/u);
+test("trusted publication performs fresh verification before and after one status POST", async () => {
+  const { args, snapshotValue } = publicationFixture();
+  const sequence = [];
+  const result = await publishTrustedStatus(args, {
+    collect: async (input) => {
+      sequence.push("verify");
+      return validatePublicationSnapshot(structuredClone(snapshotValue), input);
+    },
+    createStatus: async (input) => {
+      sequence.push(`status:${input.state}`);
+      return statusResponse(input);
+    },
+  });
+  assert.equal(result.publication, "PASS");
+  assert.deepEqual(sequence, ["verify", "status:success", "verify"]);
+});
+
+test("trusted publication invalidates success after base, head, run, or attempt drift", async () => {
+  const scenarios = [
+    ["base", (snapshotValue) => { snapshotValue.pr.baseSha = "3".repeat(40); }],
+    ["head", (snapshotValue) => { snapshotValue.pr.headSha = "4".repeat(40); }],
+    ["newer run", (snapshotValue, boundRun) => { snapshotValue.workflowRuns.push({ ...boundRun, createdAt: "2026-07-31T00:01:00Z", id: "11" }); }],
+    ["attempt", (snapshotValue) => { snapshotValue.run.attempt = "2"; }],
+  ];
+  for (const [name, mutate] of scenarios) {
+    const { args, boundRun, snapshotValue } = publicationFixture();
+    const postSnapshot = structuredClone(snapshotValue);
+    mutate(postSnapshot, boundRun);
+    const snapshots = [snapshotValue, postSnapshot];
+    const states = [];
+    await assert.rejects(publishTrustedStatus(args, {
+      collect: async (input) => validatePublicationSnapshot(structuredClone(snapshots.shift()), input),
+      createStatus: async (input) => {
+        states.push(input.state);
+        return statusResponse(input);
+      },
+    }), undefined, name);
+    assert.deepEqual(states, ["success", "failure"], name);
+  }
+});
+
+test("trusted publication rejects response binding drift and overwrites possible success", async () => {
+  const responseDrifts = [
+    ["sha", { url: `https://api.github.com/repos/y-asami3534/netlist-studio-releases/statuses/${"9".repeat(40)}` }],
+    ["context", { context: "other" }],
+    ["state", { state: "pending" }],
+    ["target URL", { target_url: "https://github.com/other" }],
+  ];
+  for (const [name, overrides] of responseDrifts) {
+    const { args, snapshotValue } = publicationFixture();
+    const states = [];
+    await assert.rejects(publishTrustedStatus(args, {
+      collect: async (input) => validatePublicationSnapshot(structuredClone(snapshotValue), input),
+      createStatus: async (input) => {
+        states.push(input.state);
+        return states.length === 1 ? statusResponse(input, overrides) : statusResponse(input);
+      },
+    }), /status response binding/u, name);
+    assert.deepEqual(states, ["success", "failure"], name);
+  }
+});
+
+test("trusted publication never returns PASS when stale success cannot be invalidated", async () => {
+  const { args, snapshotValue } = publicationFixture();
+  let statusCount = 0;
+  await assert.rejects(publishTrustedStatus(args, {
+    collect: async (input) => {
+      if (statusCount === 0) return validatePublicationSnapshot(structuredClone(snapshotValue), input);
+      throw new PolicyViolation("current pull request binding changed");
+    },
+    createStatus: async (input) => {
+      statusCount += 1;
+      return statusCount === 1 ? statusResponse(input) : statusResponse(input, { context: "other" });
+    },
+  }), /could not be invalidated/u);
+  assert.equal(statusCount, 2);
+});
+
+test("trusted status response validation binds exact SHA, context, state, and target URL", () => {
+  const { args } = publicationFixture();
+  assert.equal(validateStatusResponse(statusResponse(args), args).state, "success");
+  assert.throws(() => validateStatusResponse(statusResponse(args, { url: `https://api.github.com/repos/${args.repository}/statuses/${"0".repeat(40)}` }), args), /binding changed/u);
 });
 
 test("CLI preserves exit code 2 for usage and errors expose policy code 1", () => {

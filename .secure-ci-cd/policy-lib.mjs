@@ -208,6 +208,196 @@ export async function readCanonicalJson(filePath) {
   return { text, value };
 }
 
+function parsePermissionBlock(lines, index, indentation) {
+  const declaration = lines[index].slice(indentation).match(/^permissions:\s*(.*?)\s*$/u);
+  if (!declaration) throw new PolicyViolation("workflow permissions declaration is invalid");
+  if (declaration[1] === "{}") return { permissions: {}, nextIndex: index + 1 };
+  if (declaration[1] !== "") throw new PolicyViolation("workflow permissions must use an explicit block");
+  const permissions = {};
+  let nextIndex = index + 1;
+  for (; nextIndex < lines.length; nextIndex += 1) {
+    const line = lines[nextIndex];
+    if (/^\s*(?:#.*)?$/u.test(line)) continue;
+    const leading = line.match(/^\s*/u)[0].length;
+    if (leading <= indentation) break;
+    const entry = line.match(new RegExp(`^\\s{${indentation + 2}}([a-z-]+):\\s*(read|write|none)\\s*$`, "u"));
+    if (!entry || Object.hasOwn(permissions, entry[1])) throw new PolicyViolation("workflow permissions block is invalid");
+    permissions[entry[1]] = entry[2];
+  }
+  return { permissions, nextIndex };
+}
+
+function trustedJobPermissions(text) {
+  const lines = text.split("\n");
+  const blocks = new Map();
+  let currentJob = null;
+  let inJobs = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^jobs:\s*$/u.test(line)) {
+      inJobs = true;
+      continue;
+    }
+    if (inJobs && /^\S/u.test(line)) {
+      inJobs = false;
+      currentJob = null;
+    }
+    const job = inJobs ? line.match(/^  ([a-z0-9-]+):\s*$/u) : null;
+    if (job) currentJob = job[1];
+    const indentation = line.match(/^\s*/u)[0].length;
+    if (!/^\s*permissions:/u.test(line)) continue;
+    const scope = indentation === 0 ? "workflow" : indentation === 4 && currentJob ? currentJob : null;
+    if (!scope || blocks.has(scope)) throw new PolicyViolation("workflow permissions scope is invalid or duplicated");
+    const block = parsePermissionBlock(lines, index, indentation);
+    blocks.set(scope, block.permissions);
+    index = block.nextIndex - 1;
+  }
+  return blocks;
+}
+
+function exactPermissionMap(actual, expected, label) {
+  if (canonicalJson(actual) !== canonicalJson(expected)) throw new PolicyViolation(`${label} permissions are not least-privilege`);
+}
+
+function trustedJobLines(text, jobName) {
+  const lines = text.split("\n");
+  const marker = `  ${jobName}:`;
+  const starts = lines.flatMap((line, index) => line === marker ? [index] : []);
+  if (starts.length !== 1) throw new PolicyViolation(`trusted workflow job is missing or duplicated: ${jobName}`);
+  const start = starts[0];
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^  [a-z0-9-]+:\s*$/u.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  return lines.slice(start, end);
+}
+
+function exactTrustedLine(lines, prefix, expected, label) {
+  const matches = lines.filter((line) => line.trimStart().startsWith(prefix));
+  if (matches.length !== 1 || matches[0] !== expected) throw new PolicyViolation(`trusted final status ${label} is not exact`);
+}
+
+function namedStepScript(lines, stepName) {
+  const marker = `      - name: ${stepName}`;
+  const starts = lines.flatMap((line, index) => line === marker ? [index] : []);
+  if (starts.length !== 1) throw new PolicyViolation(`trusted final status step is missing or duplicated: ${stepName}`);
+  const start = starts[0];
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^      - /u.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  const step = lines.slice(start, end);
+  const runIndexes = step.flatMap((line, index) => line.startsWith("        run:") ? [index] : []);
+  if (runIndexes.length !== 1 || step[runIndexes[0]] !== "        run: |") throw new PolicyViolation("trusted final status run block is not exact");
+  const script = [];
+  for (let index = runIndexes[0] + 1; index < step.length; index += 1) {
+    if (!step[index].startsWith("          ")) break;
+    script.push(step[index].slice(10));
+  }
+  return script.join("\n");
+}
+
+function validateTrustedFinalStatusJob(text) {
+  const lines = trustedJobLines(text, "publish-trusted-status");
+  const stepsIndexes = lines.flatMap((line, index) => line === "    steps:" ? [index] : []);
+  if (stepsIndexes.length !== 1) throw new PolicyViolation("trusted final status steps block is missing or duplicated");
+  const stepLines = lines.slice(stepsIndexes[0] + 1);
+  const stepNames = lines.flatMap((line) => line.match(/^      - name: (.+)$/u)?.[1] ?? []);
+  const expectedSteps = [
+    "Check out the pull request base policy",
+    "Select the pinned Node.js runtime",
+    "Publish one final status for the still-current run",
+  ];
+  if (stepNames.join("\0") !== expectedSteps.join("\0") || stepLines.filter((line) => /^      - /u.test(line)).length !== expectedSteps.length) throw new PolicyViolation("trusted final status step inventory is not exact");
+  exactTrustedLine(lines, "if:", "    if: ${{ always() }}", "fail-closed condition");
+  exactTrustedLine(lines, "NS_INITIALIZE_RESULT:", "          NS_INITIALIZE_RESULT: ${{ needs.initialize-trusted-status.result }}", "initializer result binding");
+  exactTrustedLine(lines, "NS_VALIDATION_RESULT:", "          NS_VALIDATION_RESULT: ${{ needs.validate-candidate-data.result }}", "validation result binding");
+  const expectedScript = [
+    "set -euo pipefail",
+    "final_state=failure",
+    "final_description=\"default branch policy validation failed\"",
+    "if [[ \"${NS_INITIALIZE_RESULT}\" == \"success\" && \"${NS_VALIDATION_RESULT}\" == \"success\" ]]; then",
+    "  final_state=success",
+    "  final_description=\"default branch policy validation passed\"",
+    "fi",
+    "node .secure-ci-cd/policy-cli.mjs publish-trusted-status \\",
+    "  --github \\",
+    "  --repository \"${NS_REPOSITORY}\" \\",
+    "  --workflow-path \".github/workflows/channel-trusted-policy.yml\" \\",
+    "  --pr-number \"${NS_PR_NUMBER}\" \\",
+    "  --base-sha \"${NS_BASE_SHA}\" \\",
+    "  --head-sha \"${NS_HEAD_SHA}\" \\",
+    "  --run-id \"${GITHUB_RUN_ID}\" \\",
+    "  --attempt \"${GITHUB_RUN_ATTEMPT}\" \\",
+    "  --state \"${final_state}\" \\",
+    "  --context trusted-policy \\",
+    "  --description \"${final_description}\" \\",
+    "  --target-url \"${NS_TARGET_URL}\"",
+    "[[ \"${final_state}\" == \"success\" ]]",
+  ].join("\n");
+  if (namedStepScript(lines, "Publish one final status for the still-current run") !== expectedScript) throw new PolicyViolation("trusted final status decision script is not exact");
+}
+
+export function validateWorkflowText(text, role, contract) {
+  const forbidden = [
+    /\bpaths-ignore\s*:/u,
+    /\bpaths\s*:/u,
+    /\bcontinue-on-error\s*:/u,
+    /\bsecrets\s*\./u,
+    /permissions\s*:\s*(?:read-all|write-all)/u,
+    /github\.head_ref/u,
+    /^\s*(?:npm|npx|pnpm|yarn|bun)\b/gmu,
+    /^\s*eval\b/gmu,
+  ];
+  for (const pattern of forbidden) if (pattern.test(text)) throw new PolicyViolation(`${role} workflow contains forbidden construct: ${pattern}`);
+  const uses = [...text.matchAll(/^\s*uses:\s*([^\s#]+)\s*$/gmu)].map((match) => match[1]);
+  const allowedActions = new Set(Object.values(contract.toolchain.actions).map((action) => `${action.repository}@${action.commitSha}`));
+  for (const action of uses) if (!allowedActions.has(action)) throw new PolicyViolation(`${role} workflow uses an unpinned or unknown action: ${action}`);
+  if (uses.some((action) => !/@[0-9a-f]{40}$/u.test(action))) throw new PolicyViolation(`${role} workflow action is not full-SHA pinned`);
+  const checkout = `${contract.toolchain.actions.checkout.repository}@${contract.toolchain.actions.checkout.commitSha}`;
+  const checkoutCount = uses.filter((action) => action === checkout).length;
+  const refs = [...text.matchAll(/^\s+ref:\s*(.+?)\s*$/gmu)].map((match) => match[1]);
+  const credentialGuards = [...text.matchAll(/^\s+persist-credentials:\s*false\s*$/gmu)].length;
+  if (checkoutCount === 0 || refs.length !== checkoutCount || credentialGuards !== checkoutCount) throw new PolicyViolation(`${role} workflow checkout must be explicit and credentialless`);
+  const pullRequestBaseRef = "${{ github.event.pull_request.base.sha }}";
+  const defaultBranchRef = "${{ github.event.repository.default_branch }}";
+  const expectedRef = role === "manual-promotion" ? defaultBranchRef : pullRequestBaseRef;
+  if (refs.some((ref) => ref !== expectedRef)) throw new PolicyViolation(`${role} workflow may check out only its trusted policy ref`);
+  const conditions = [...text.matchAll(/^\s+if:\s*(.+?)\s*$/gmu)].map((match) => match[1]);
+  if (role === "trusted-policy") {
+    if (conditions.length !== 1 || conditions[0] !== "${{ always() }}") throw new PolicyViolation("trusted workflow may use only the final fail-closed condition");
+  } else if (conditions.length !== 0) {
+    throw new PolicyViolation(`${role} workflow must not contain conditional jobs or steps`);
+  }
+  if (role === "source-ci") {
+    for (const token of ["pull_request:", "channel-data:", "name: channel-data", "validate-change", "--github", "write-source-evidence", "contents: read"]) if (!text.includes(token)) throw new PolicyViolation(`source workflow is missing ${token}`);
+    if (text.includes("pull_request_target:") || text.includes("statuses: write")) throw new PolicyViolation("source workflow trust boundary is invalid");
+  }
+  if (role === "trusted-policy") {
+    for (const token of ["pull_request_target:", "initialize-trusted-status:", "validate-candidate-data:", "publish-trusted-status:", "--state pending", "--context trusted-policy", "statuses: write"]) if (!text.includes(token)) throw new PolicyViolation(`trusted workflow is missing ${token}`);
+    if (text.includes("upload-artifact@") || text.includes("workflow_dispatch:") || text.includes("set-status") || text.includes("verify-trusted-publication")) throw new PolicyViolation("trusted workflow contains a split or unsafe status publication path");
+    if ((text.match(/policy-cli\.mjs publish-trusted-status/gu) ?? []).length !== 2) throw new PolicyViolation("trusted workflow must publish both status transitions exactly once");
+    validateTrustedFinalStatusJob(text);
+    const blocks = trustedJobPermissions(text);
+    if ([...blocks.keys()].sort().join("\0") !== ["initialize-trusted-status", "publish-trusted-status", "validate-candidate-data", "workflow"].sort().join("\0")) throw new PolicyViolation("trusted workflow permission scopes are incomplete");
+    exactPermissionMap(blocks.get("workflow"), {}, "trusted workflow");
+    const publisher = { actions: "read", contents: "read", "pull-requests": "read", statuses: "write" };
+    exactPermissionMap(blocks.get("initialize-trusted-status"), publisher, "trusted initializer");
+    exactPermissionMap(blocks.get("validate-candidate-data"), { contents: "read" }, "trusted validator");
+    exactPermissionMap(blocks.get("publish-trusted-status"), publisher, "trusted publisher");
+  }
+  if (role === "manual-promotion") {
+    for (const token of ["workflow_dispatch:", "verify-promotion:", "verify-run-evidence", "write-promotion-receipt", "actions: read", "contents: read"]) if (!text.includes(token)) throw new PolicyViolation(`promotion workflow is missing ${token}`);
+    if (text.includes("set-status") || text.includes("publish-trusted-status") || text.includes("pull_request_target:")) throw new PolicyViolation("promotion workflow must remain read-only");
+  }
+}
+
 export function validateConfiguration(contract, policy) {
   exactKeys(contract, ["canonical", "externalHolds", "kind", "promotion", "provider", "providerInvariants", "requiredChecks", "schemaVersion", "toolchain", "trustZones"], "contract");
   if (contract.kind !== "netlist-studio-release-channel-pipeline" || contract.schemaVersion !== 1 || contract.provider !== "github") {
@@ -219,12 +409,14 @@ export function validateConfiguration(contract, policy) {
   }
   const source = contract.trustZones?.["source-ci"];
   const trusted = contract.trustZones?.["trusted-policy"];
-  if (source?.event !== "pull_request" || source.executesCandidate !== false || source.candidateMode !== "git-data-only" || source.allowSecrets !== false) {
+  const promotion = contract.trustZones?.["manual-promotion"];
+  if (source?.event !== "pull_request" || source.executesCandidate !== false || source.candidateMode !== "git-data-only" || source.allowSecrets !== false || source.workflowPath !== ".github/workflows/channel-source-ci.yml") {
     throw new PolicyViolation("source CI must be candidate-data-only and unprivileged");
   }
-  if (trusted?.event !== "pull_request_target" || trusted.executesCandidate !== false || trusted.candidateMode !== "git-data-only" || trusted.policySource !== "pull-request-base") {
+  if (trusted?.event !== "pull_request_target" || trusted.executesCandidate !== false || trusted.candidateMode !== "git-data-only" || trusted.policySource !== "pull-request-base" || trusted.workflowPath !== ".github/workflows/channel-trusted-policy.yml") {
     throw new PolicyViolation("trusted policy boundary is invalid");
   }
+  if (promotion?.event !== "workflow_dispatch" || promotion.externalMutation !== false || promotion.candidateMode !== "git-data-only" || promotion.allowSecrets !== false || promotion.workflowPath !== ".github/workflows/channel-promotion-evidence.yml") throw new PolicyViolation("promotion evidence boundary is invalid");
   const contexts = contract.requiredChecks.map((check) => check.name);
   if (contexts.join("\0") !== "channel-data\0trusted-policy") throw new PolicyViolation("required check set drifted");
   const gate = contract.providerInvariants?.requiredWorkflowGate;
@@ -234,7 +426,11 @@ export function validateConfiguration(contract, policy) {
   if (contract.providerInvariants.readbackRequired !== true || contract.providerInvariants.strictRequiredChecks !== true || contract.providerInvariants.requireCurrentBaseForMerge !== true) {
     throw new PolicyViolation("provider read-back and strict checks are required");
   }
-  for (const action of Object.values(contract.toolchain?.actions ?? {})) {
+  const actions = exactKeys(contract.toolchain?.actions, ["checkout", "setupNode", "uploadArtifact"], "contract toolchain actions");
+  const actionRepositories = { checkout: "actions/checkout", setupNode: "actions/setup-node", uploadArtifact: "actions/upload-artifact" };
+  for (const [name, action] of Object.entries(actions)) {
+    exactKeys(action, ["commitSha", "repository", "version"], `contract action ${name}`);
+    if (action.repository !== actionRepositories[name]) throw new PolicyViolation(`contract action repository drifted: ${name}`);
     if (!FULL_SHA.test(action?.commitSha ?? "")) throw new PolicyViolation("actions must use full commit SHAs");
   }
 
@@ -244,6 +440,11 @@ export function validateConfiguration(contract, policy) {
     throw new PolicyViolation("channel repository identity drifted");
   }
   if (policy.bootstrap.baseCommit !== "db9a9a6166b5b94043a930bbc73633b27dc42b8f" || policy.bootstrap.oneTime !== true) throw new PolicyViolation("bootstrap exception drifted");
+  exactKeys(policy.changeClasses, ["policy-maintenance", "provider-policy", "release-manifest", "stable-channel"], "channel policy change classes");
+  for (const [className, paths] of Object.entries(policy.changeClasses)) {
+    if (!Array.isArray(paths) || paths.length === 0 || new Set(paths).size !== paths.length || paths.some((relativePath) => typeof relativePath !== "string" || relativePath.length === 0)) throw new PolicyViolation(`channel policy change class is invalid: ${className}`);
+  }
+  if (!exactPathSet(policy.changeClasses["policy-maintenance"], policy.bootstrap.requiredPaths)) throw new PolicyViolation("policy maintenance path set must match the protected bootstrap path set");
   if (policy.providerException.approved !== true || policy.providerException.exceptionId !== gate.exceptionId) throw new PolicyViolation("provider exception is not approved and bound");
   if (policy.channel.directory !== "channels/stable/macos/arm64" || policy.channel.initialVersion !== "0.40.0" || policy.channel.initialPreviousVersion !== "0.39.23") throw new PolicyViolation("stable channel identity drifted");
   return Object.freeze({ contract, policy });
@@ -315,9 +516,8 @@ export function classifyChangedPaths(paths, { baseHasPolicy, baseSha, policy }) 
   for (const className of ["provider-policy", "release-manifest", "stable-channel"]) {
     if (exactPathSet(changed, policy.changeClasses[className])) return className;
   }
-  if (changed.some((relativePath) => bootstrap.includes(relativePath))) {
-    throw new PolicyViolation("protected policy bytes are immutable after bootstrap");
-  }
+  const maintenance = new Set(policy.changeClasses["policy-maintenance"] ?? []);
+  if (changed.every((relativePath) => maintenance.has(relativePath))) return "policy-maintenance";
   throw new PolicyViolation("change classes must not be mixed or incomplete");
 }
 
@@ -562,6 +762,40 @@ export function validateProviderFiles(candidate, policy) {
   return Object.freeze({ classification: "provider-policy", readback, request });
 }
 
+function canonicalSnapshotJson(candidate, relativePath) {
+  const bytes = candidate.files.get(relativePath);
+  if (!bytes) throw new PolicyViolation(`policy maintenance candidate is missing ${relativePath}`);
+  const text = bytes.toString("utf8");
+  const value = parseJsonStrict(text);
+  if (text !== canonicalJson(value)) throw new PolicyViolation(`policy maintenance candidate is not canonical: ${relativePath}`);
+  return { text, value };
+}
+
+export function validatePolicyMaintenance({ candidate, contract, policy }) {
+  for (const relativePath of policy.bootstrap.requiredPaths) {
+    if (!candidate.files.has(relativePath)) throw new PolicyViolation(`policy maintenance candidate is missing protected path: ${relativePath}`);
+  }
+  const candidateContract = canonicalSnapshotJson(candidate, "pipeline.contract.json").value;
+  const candidatePolicy = canonicalSnapshotJson(candidate, "channel-policy.json").value;
+  validateConfiguration(candidateContract, candidatePolicy);
+  if (canonicalJson(candidateContract) !== canonicalJson(contract) || canonicalJson(candidatePolicy) !== canonicalJson(policy)) throw new PolicyViolation("policy maintenance candidate may not redefine authority-bearing configuration");
+  const workflows = {
+    "manual-promotion": candidateContract.trustZones["manual-promotion"].workflowPath,
+    "source-ci": candidateContract.trustZones["source-ci"].workflowPath,
+    "trusted-policy": candidateContract.trustZones["trusted-policy"].workflowPath,
+  };
+  for (const [role, relativePath] of Object.entries(workflows)) {
+    const bytes = candidate.files.get(relativePath);
+    if (!bytes) throw new PolicyViolation(`policy maintenance candidate is missing workflow: ${relativePath}`);
+    validateWorkflowText(bytes.toString("utf8"), role, contract);
+  }
+  return Object.freeze({
+    classification: "policy-maintenance",
+    contractSha256: sha256Text(canonicalJson(candidateContract)),
+    policySha256: sha256Text(canonicalJson(candidatePolicy)),
+  });
+}
+
 export async function validateChange({ base, candidate, baseSha, contract, policy }) {
   validateConfiguration(contract, policy);
   const paths = changedPaths(base, candidate);
@@ -570,6 +804,7 @@ export async function validateChange({ base, candidate, baseSha, contract, polic
   if (classification === "stable-channel") details = validateStableChannelSnapshot({ base, candidate, policy });
   else if (classification === "release-manifest") details = validateReleaseManifestUpdate({ base, candidate, policy });
   else if (classification === "provider-policy") details = validateProviderFiles(candidate, policy);
+  else if (classification === "policy-maintenance") details = validatePolicyMaintenance({ candidate, contract, policy });
   return Object.freeze({ classification, changedPaths: paths, details });
 }
 

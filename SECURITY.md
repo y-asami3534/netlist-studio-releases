@@ -18,10 +18,28 @@ GitHubのprovider-native required workflowはOrganizationまたはEnterprise所�
 - strict required status checksを有効にする。
 - required contextのsource appをexactなGitHub Actions integrationへ固定する。
 - trusted workflow、contract、validatorのcandidate bytesをdefault branchと照合する。
-- status公開の前後でcurrent PR base/headとlatest run/attemptを再照合する。
+- status公開はdefault branchの一体化したpublisherだけが行い、current PR base/headとlatest run/attemptを公開前後に再照合し、GitHub応答URL内のexact SHA、context、state、target URLも照合する。
+- success公開後の再照合が失敗した場合は、同じexact head／contextをfailureで上書きしてfail-closedにする。
+- candidate validation jobは`contents: read`だけを持ち、`statuses: write`はinitialize／publish jobだけに付与する。
 - bypass、force-push、main deletionを許可しない。
 
 required workflowが防ぐrunner queue開始前のwindowを完全には代替できない残余riskは、承認済み例外として保持します。Organizationへ移管する場合は、別のpolicy work unitでrequired workflowへ移行します。
+
+## Policy maintenance
+
+bootstrap後のpolicy修正は`policy-maintenance` classとして扱います。default branchのvalidatorだけがcandidate treeをGit dataとして読み、protected path allowlist内の非空subsetだけを許可します。release manifest、stable channel、provider evidenceとの混在は拒否します。
+
+candidateのscript、test、workflowを実行しません。candidate contract／policyはcanonical JSONとしてbase validatorで検査し、baseのauthority-bearing configurationからの変更を拒否します。3 workflowはbase contractをauthorityとしてbase validatorが静的監査し、trusted workflowのjob別permissionと一体化したstatus publisherを検証します。
+
+## One-time PR-only provider maintenance exception
+
+`owner-policy-repair-2026-07-31`は、`main@dcb4434a532589efda17cffaf2eb9a0781ebfe2e`で判明したtrusted status publication raceを修復するPRだけに承認された一回限りの例外です。
+
+- exact repair PRの実装、local test、静的監査、署名commit、独立review完了後にだけ有効化する。
+- external mode `0700` directoryへallowlist形式のrollback snapshotを保存する。
+- repository administratorのbypassは`pull_request` modeだけとし、署名、PR、merge commit、force-push／deletion禁止を含む他の保護は維持する。
+- exact headの2-parent merge直後、またはmerge失敗直後に、bypassを空へ復元してAPI read-backを照合する。
+- release manifest、tag、GitHub Release、stable feedを変更せず、同じ例外を再利用しない。
 
 ## One-time bootstrap exception
 

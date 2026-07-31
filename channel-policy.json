@@ -19,6 +19,20 @@
     ]
   },
   "changeClasses": {
+    "policy-maintenance": [
+      ".github/workflows/channel-promotion-evidence.yml",
+      ".github/workflows/channel-source-ci.yml",
+      ".github/workflows/channel-trusted-policy.yml",
+      ".secure-ci-cd/policy-cli.mjs",
+      ".secure-ci-cd/policy-lib.mjs",
+      ".secure-ci-cd/verify-run-evidence.mjs",
+      ".secure-ci-cd/verify-trusted-publication.mjs",
+      "README.md",
+      "SECURITY.md",
+      "channel-policy.json",
+      "pipeline.contract.json",
+      "test/channel-policy.test.mjs"
+    ],
     "provider-policy": [
       "SECURITY.md",
       "provider-policy.request.json",
