@@ -1,41 +1,41 @@
 {
   "schema": "netlist-studio.release-manifest",
   "schemaVersion": 2,
-  "version": "0.39.23",
+  "version": "0.40.0",
   "source": {
     "repository": "y-asami3534/netlist-studio",
-    "commit": "41e6511ec6ac22648c9df5f585b947da06fea828",
-    "tag": "v0.39.23",
-    "tagObject": "7a8217993a7c426c61d1b4c92a7964f41771c67a"
+    "commit": "e1d29bde6cb2a5e6a992b7289fba07d12e1225aa",
+    "tag": "v0.40.0",
+    "tagObject": "44c0d5a68acd4019ee9aec125670f4c7aff64f90"
   },
   "artifacts": [
     {
-      "name": "Netlist-Studio-0.39.23-arm64.dmg",
-      "sha256": "2e588184354d30e6f3f85ae4dc1543e66db5b5aa8b5e50964b688b6c4f6cf3e0",
-      "size": 183289953
+      "name": "Netlist-Studio-0.40.0-arm64.dmg",
+      "sha256": "cc3926a235aab34842bdef03e167d4df8dcaddab16ec1216c5200b3d7ab969c4",
+      "size": 183738084
     },
     {
-      "name": "Netlist-Studio-0.39.23-arm64.zip",
-      "sha256": "eb8cdf7c703d51f616f2669a1bdc64434c73c45332b9b4abd464d4ca531713f1",
-      "size": 176767009
+      "name": "Netlist-Studio-0.40.0-arm64.zip",
+      "sha256": "7e8284503f102dd03bd6ac8687dd48b992fb72b47c7d66708ca74bac07644bcf",
+      "size": 183344806
     }
   ],
   "evidence": {
     "name": "release-evidence.json",
-    "sha256": "1c865bc49f44c25df42337a97672aad0a1aeed13af9de0724b6bc1b04d7b289f",
-    "size": 1932
+    "sha256": "15f4d3ebc451e6bce5df7284e7252d92267c27b670ccad03e6eca8b4551f16d0",
+    "size": 1929
   },
   "approval": {
     "releaseOwner": "浅見悠介",
     "githubId": 50958596,
     "approved": true,
-    "confirmation": "RELEASE OWNER APPROVE v0.39.23",
+    "confirmation": "RELEASE OWNER APPROVE v0.40.0",
     "signingKeyFingerprint": "SHA256:byJQrGJp2En8bA2tWQcD73wnEnJRGjSz7tpRwoJWA4w",
     "evidence": {
       "repository": "y-asami3534/netlist-studio",
-      "commit": "2eda58568913bc748b8930e66baf0ad0647efd9b",
-      "path": "reports/20260729_0128_v0.39.23_正式候補・人手妥当性確認・公開承認_リリースレポート.md",
-      "sha256": "47dbbb5a7a2a44e0d2869fe9561dcfa3294c61956e27e528be1c7b5816f2b484"
+      "commit": "c5c88cd11cd347dcd34a8e951c801bf280e08fe5",
+      "path": "reports/20260801_0106_v0.40.0_正式候補・人手妥当性確認・公開承認_リリースレポート.md",
+      "sha256": "6db30ef959264f9049d376552d2c3fb865dea8e4f6b33b85ffcabfed24671f24"
     }
   }
 }
