@@ -138,9 +138,9 @@ function statusResponse(input, overrides = {}) {
   return {
     context: input.context,
     creator: { id: 15368 },
-    sha: input.headSha,
     state: input.state,
     target_url: input.targetUrl,
+    url: `https://api.github.com/repos/${input.repository}/statuses/${input.headSha}`,
     ...overrides,
   };
 }
@@ -456,7 +456,7 @@ test("trusted publication invalidates success after base, head, run, or attempt 
 
 test("trusted publication rejects response binding drift and overwrites possible success", async () => {
   const responseDrifts = [
-    ["sha", { sha: "9".repeat(40) }],
+    ["sha", { url: `https://api.github.com/repos/y-asami3534/netlist-studio-releases/statuses/${"9".repeat(40)}` }],
     ["context", { context: "other" }],
     ["state", { state: "pending" }],
     ["target URL", { target_url: "https://github.com/other" }],
@@ -494,7 +494,7 @@ test("trusted publication never returns PASS when stale success cannot be invali
 test("trusted status response validation binds exact SHA, context, state, and target URL", () => {
   const { args } = publicationFixture();
   assert.equal(validateStatusResponse(statusResponse(args), args).state, "success");
-  assert.throws(() => validateStatusResponse(statusResponse(args, { sha: "0".repeat(40) }), args), /binding changed/u);
+  assert.throws(() => validateStatusResponse(statusResponse(args, { url: `https://api.github.com/repos/${args.repository}/statuses/${"0".repeat(40)}` }), args), /binding changed/u);
 });
 
 test("CLI preserves exit code 2 for usage and errors expose policy code 1", () => {

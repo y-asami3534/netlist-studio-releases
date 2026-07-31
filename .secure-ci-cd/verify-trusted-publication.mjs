@@ -42,10 +42,11 @@ function validateStatusInput(input) {
 }
 
 export function validateStatusResponse(response, input) {
-  if (response?.sha !== input.headSha || response?.context !== input.context || response?.state !== input.state || response?.target_url !== input.targetUrl) {
+  const expectedUrl = `https://api.github.com/repos/${input.repository}/statuses/${input.headSha}`;
+  if (response?.url !== expectedUrl || response?.context !== input.context || response?.state !== input.state || response?.target_url !== input.targetUrl) {
     throw new PolicyViolation("GitHub status response binding changed");
   }
-  return Object.freeze({ context: response.context, creatorId: response.creator?.id ?? null, sha: response.sha, state: response.state, targetUrl: response.target_url });
+  return Object.freeze({ context: response.context, creatorId: response.creator?.id ?? null, sha: input.headSha, state: response.state, targetUrl: response.target_url });
 }
 
 export function validatePublicationSnapshot(snapshot, input) {

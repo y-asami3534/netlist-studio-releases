@@ -18,7 +18,7 @@ GitHubのprovider-native required workflowはOrganizationまたはEnterprise所�
 - strict required status checksを有効にする。
 - required contextのsource appをexactなGitHub Actions integrationへ固定する。
 - trusted workflow、contract、validatorのcandidate bytesをdefault branchと照合する。
-- status公開はdefault branchの一体化したpublisherだけが行い、current PR base/headとlatest run/attemptを公開前後に再照合し、GitHub応答のSHA、context、state、target URLも照合する。
+- status公開はdefault branchの一体化したpublisherだけが行い、current PR base/headとlatest run/attemptを公開前後に再照合し、GitHub応答URL内のexact SHA、context、state、target URLも照合する。
 - success公開後の再照合が失敗した場合は、同じexact head／contextをfailureで上書きしてfail-closedにする。
 - candidate validation jobは`contents: read`だけを持ち、`statuses: write`はinitialize／publish jobだけに付与する。
 - bypass、force-push、main deletionを許可しない。
