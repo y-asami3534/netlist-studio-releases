@@ -325,6 +325,28 @@ test("trusted workflow permissions keep candidate validation read-only", async (
   await assert.rejects(validateChange({ base, candidate, baseSha: "a".repeat(40), contract, policy }), /validator permissions/u);
 });
 
+test("trusted final status decision is exact and rejects fail-open workflow edits", async () => {
+  const workflowPath = path.join(repositoryRoot, ".github/workflows/channel-trusted-policy.yml");
+  const text = await readFile(workflowPath, "utf8");
+  assert.doesNotThrow(() => validateWorkflowText(text, "trusted-policy", contract));
+
+  const mutations = [
+    text.replace('if [[ "${NS_INITIALIZE_RESULT}" == "success" && "${NS_VALIDATION_RESULT}" == "success" ]]; then', "if true; then"),
+    text.replace("          fi\n          node .secure-ci-cd/policy-cli.mjs publish-trusted-status \\", "          fi\n          final_state=success\n          node .secure-ci-cd/policy-cli.mjs publish-trusted-status \\"),
+    text.replace('          [[ "${final_state}" == "success" ]]', ""),
+    text.replace("          NS_VALIDATION_RESULT: ${{ needs.validate-candidate-data.result }}", "          NS_VALIDATION_RESULT: success"),
+  ];
+  for (const candidateText of mutations) {
+    assert.notEqual(candidateText, text);
+    assert.throws(() => validateWorkflowText(candidateText, "trusted-policy", contract), /trusted final status/u);
+  }
+
+  const base = await readRepositorySnapshot(repositoryRoot, policy);
+  const candidate = cloneSnapshot(base);
+  candidate.files.set(".github/workflows/channel-trusted-policy.yml", Buffer.from(mutations[0]));
+  await assert.rejects(validateChange({ base, candidate, baseSha: "a".repeat(40), contract, policy }), /trusted final status/u);
+});
+
 test("initial channel accepts the exact pair and rejects metadata, URL, key, and version drift", () => {
   const validBinding = binding();
   const bindingText = `${JSON.stringify(validBinding, null, 2)}\n`;

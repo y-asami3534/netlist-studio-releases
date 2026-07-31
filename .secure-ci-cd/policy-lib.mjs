@@ -259,6 +259,91 @@ function exactPermissionMap(actual, expected, label) {
   if (canonicalJson(actual) !== canonicalJson(expected)) throw new PolicyViolation(`${label} permissions are not least-privilege`);
 }
 
+function trustedJobLines(text, jobName) {
+  const lines = text.split("\n");
+  const marker = `  ${jobName}:`;
+  const starts = lines.flatMap((line, index) => line === marker ? [index] : []);
+  if (starts.length !== 1) throw new PolicyViolation(`trusted workflow job is missing or duplicated: ${jobName}`);
+  const start = starts[0];
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^  [a-z0-9-]+:\s*$/u.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  return lines.slice(start, end);
+}
+
+function exactTrustedLine(lines, prefix, expected, label) {
+  const matches = lines.filter((line) => line.trimStart().startsWith(prefix));
+  if (matches.length !== 1 || matches[0] !== expected) throw new PolicyViolation(`trusted final status ${label} is not exact`);
+}
+
+function namedStepScript(lines, stepName) {
+  const marker = `      - name: ${stepName}`;
+  const starts = lines.flatMap((line, index) => line === marker ? [index] : []);
+  if (starts.length !== 1) throw new PolicyViolation(`trusted final status step is missing or duplicated: ${stepName}`);
+  const start = starts[0];
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^      - /u.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  const step = lines.slice(start, end);
+  const runIndexes = step.flatMap((line, index) => line.startsWith("        run:") ? [index] : []);
+  if (runIndexes.length !== 1 || step[runIndexes[0]] !== "        run: |") throw new PolicyViolation("trusted final status run block is not exact");
+  const script = [];
+  for (let index = runIndexes[0] + 1; index < step.length; index += 1) {
+    if (!step[index].startsWith("          ")) break;
+    script.push(step[index].slice(10));
+  }
+  return script.join("\n");
+}
+
+function validateTrustedFinalStatusJob(text) {
+  const lines = trustedJobLines(text, "publish-trusted-status");
+  const stepsIndexes = lines.flatMap((line, index) => line === "    steps:" ? [index] : []);
+  if (stepsIndexes.length !== 1) throw new PolicyViolation("trusted final status steps block is missing or duplicated");
+  const stepLines = lines.slice(stepsIndexes[0] + 1);
+  const stepNames = lines.flatMap((line) => line.match(/^      - name: (.+)$/u)?.[1] ?? []);
+  const expectedSteps = [
+    "Check out the pull request base policy",
+    "Select the pinned Node.js runtime",
+    "Publish one final status for the still-current run",
+  ];
+  if (stepNames.join("\0") !== expectedSteps.join("\0") || stepLines.filter((line) => /^      - /u.test(line)).length !== expectedSteps.length) throw new PolicyViolation("trusted final status step inventory is not exact");
+  exactTrustedLine(lines, "if:", "    if: ${{ always() }}", "fail-closed condition");
+  exactTrustedLine(lines, "NS_INITIALIZE_RESULT:", "          NS_INITIALIZE_RESULT: ${{ needs.initialize-trusted-status.result }}", "initializer result binding");
+  exactTrustedLine(lines, "NS_VALIDATION_RESULT:", "          NS_VALIDATION_RESULT: ${{ needs.validate-candidate-data.result }}", "validation result binding");
+  const expectedScript = [
+    "set -euo pipefail",
+    "final_state=failure",
+    "final_description=\"default branch policy validation failed\"",
+    "if [[ \"${NS_INITIALIZE_RESULT}\" == \"success\" && \"${NS_VALIDATION_RESULT}\" == \"success\" ]]; then",
+    "  final_state=success",
+    "  final_description=\"default branch policy validation passed\"",
+    "fi",
+    "node .secure-ci-cd/policy-cli.mjs publish-trusted-status \\",
+    "  --github \\",
+    "  --repository \"${NS_REPOSITORY}\" \\",
+    "  --workflow-path \".github/workflows/channel-trusted-policy.yml\" \\",
+    "  --pr-number \"${NS_PR_NUMBER}\" \\",
+    "  --base-sha \"${NS_BASE_SHA}\" \\",
+    "  --head-sha \"${NS_HEAD_SHA}\" \\",
+    "  --run-id \"${GITHUB_RUN_ID}\" \\",
+    "  --attempt \"${GITHUB_RUN_ATTEMPT}\" \\",
+    "  --state \"${final_state}\" \\",
+    "  --context trusted-policy \\",
+    "  --description \"${final_description}\" \\",
+    "  --target-url \"${NS_TARGET_URL}\"",
+    "[[ \"${final_state}\" == \"success\" ]]",
+  ].join("\n");
+  if (namedStepScript(lines, "Publish one final status for the still-current run") !== expectedScript) throw new PolicyViolation("trusted final status decision script is not exact");
+}
+
 export function validateWorkflowText(text, role, contract) {
   const forbidden = [
     /\bpaths-ignore\s*:/u,
@@ -298,6 +383,7 @@ export function validateWorkflowText(text, role, contract) {
     for (const token of ["pull_request_target:", "initialize-trusted-status:", "validate-candidate-data:", "publish-trusted-status:", "--state pending", "--context trusted-policy", "statuses: write"]) if (!text.includes(token)) throw new PolicyViolation(`trusted workflow is missing ${token}`);
     if (text.includes("upload-artifact@") || text.includes("workflow_dispatch:") || text.includes("set-status") || text.includes("verify-trusted-publication")) throw new PolicyViolation("trusted workflow contains a split or unsafe status publication path");
     if ((text.match(/policy-cli\.mjs publish-trusted-status/gu) ?? []).length !== 2) throw new PolicyViolation("trusted workflow must publish both status transitions exactly once");
+    validateTrustedFinalStatusJob(text);
     const blocks = trustedJobPermissions(text);
     if ([...blocks.keys()].sort().join("\0") !== ["initialize-trusted-status", "publish-trusted-status", "validate-candidate-data", "workflow"].sort().join("\0")) throw new PolicyViolation("trusted workflow permission scopes are incomplete");
     exactPermissionMap(blocks.get("workflow"), {}, "trusted workflow");
