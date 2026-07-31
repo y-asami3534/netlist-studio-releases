@@ -1,0 +1,83 @@
+{
+  "bootstrap": {
+    "baseCommit": "db9a9a6166b5b94043a930bbc73633b27dc42b8f",
+    "exceptionId": "owner-bootstrap-2026-07-31",
+    "oneTime": true,
+    "requiredPaths": [
+      ".github/workflows/channel-promotion-evidence.yml",
+      ".github/workflows/channel-source-ci.yml",
+      ".github/workflows/channel-trusted-policy.yml",
+      ".secure-ci-cd/policy-cli.mjs",
+      ".secure-ci-cd/policy-lib.mjs",
+      ".secure-ci-cd/verify-run-evidence.mjs",
+      ".secure-ci-cd/verify-trusted-publication.mjs",
+      "README.md",
+      "SECURITY.md",
+      "channel-policy.json",
+      "pipeline.contract.json",
+      "test/channel-policy.test.mjs"
+    ]
+  },
+  "changeClasses": {
+    "provider-policy": [
+      "SECURITY.md",
+      "provider-policy.request.json",
+      "provider-policy.readback.json"
+    ],
+    "release-manifest": [
+      "release-manifest.json"
+    ],
+    "stable-channel": [
+      "channels/stable/macos/arm64/channel-binding.json",
+      "channels/stable/macos/arm64/latest-mac.yml"
+    ]
+  },
+  "channel": {
+    "arch": "arm64",
+    "directory": "channels/stable/macos/arm64",
+    "files": [
+      "channel-binding.json",
+      "latest-mac.yml"
+    ],
+    "initialPreviousVersion": "0.39.23",
+    "initialVersion": "0.40.0",
+    "name": "stable",
+    "platform": "macos"
+  },
+  "limits": {
+    "channelBindingBytes": 65536,
+    "latestMacBytes": 65536,
+    "maximumFileBytes": 1048576,
+    "maximumRepositoryBytes": 4194304,
+    "maximumTreeEntries": 64
+  },
+  "providerException": {
+    "approved": true,
+    "compensatingControls": [
+      "strict-required-status-checks",
+      "canonical-base-validator",
+      "exact-base-head-run-binding",
+      "provider-policy-readback"
+    ],
+    "exceptionId": "personal-repository-no-required-workflow-v1",
+    "residualRisk": "A personal repository cannot enforce an organization-level required workflow before the trusted status is queued."
+  },
+  "releaseTag": {
+    "messageSchema": "netlist-studio.formal-release-tag/v1",
+    "ownerGithubId": 50958596,
+    "signingKeyFingerprint": "SHA256:byJQrGJp2En8bA2tWQcD73wnEnJRGjSz7tpRwoJWA4w",
+    "signingPrincipal": "50958596+y-asami3534@users.noreply.github.com"
+  },
+  "repositories": {
+    "release": {
+      "fullName": "y-asami3534/netlist-studio-releases",
+      "id": 1280945456
+    },
+    "source": {
+      "fullName": "y-asami3534/netlist-studio",
+      "id": 1314731557
+    }
+  },
+  "schema": "netlist-studio.stable-channel-policy",
+  "schemaVersion": 1
+}

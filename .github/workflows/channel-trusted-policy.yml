@@ -1,0 +1,164 @@
+name: macOS stable channel trusted policy
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: trusted-policy-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  initialize-trusted-status:
+    name: initialize-trusted-status
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the pull request base policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Select the pinned Node.js runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.18.0
+          check-latest: false
+      - name: Bind the pending status to the current trusted run
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          NS_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          NS_PR_NUMBER: ${{ github.event.pull_request.number }}
+          NS_REPOSITORY: y-asami3534/netlist-studio-releases
+          NS_TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .secure-ci-cd/policy-cli.mjs verify-trusted-publication \
+            --github \
+            --repository "${NS_REPOSITORY}" \
+            --workflow-path ".github/workflows/channel-trusted-policy.yml" \
+            --pr-number "${NS_PR_NUMBER}" \
+            --base-sha "${NS_BASE_SHA}" \
+            --head-sha "${NS_HEAD_SHA}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --attempt "${GITHUB_RUN_ATTEMPT}"
+          node .secure-ci-cd/policy-cli.mjs set-status \
+            --github \
+            --repository "${NS_REPOSITORY}" \
+            --sha "${NS_HEAD_SHA}" \
+            --state pending \
+            --context trusted-policy \
+            --description "default branch policy validation is running" \
+            --target-url "${NS_TARGET_URL}"
+
+  validate-candidate-data:
+    name: validate-candidate-data
+    needs:
+      - initialize-trusted-status
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the pull request base policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Select the pinned Node.js runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.18.0
+          check-latest: false
+      - name: Run the default branch validator against candidate Git data
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          NS_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          NS_PR_NUMBER: ${{ github.event.pull_request.number }}
+          NS_REPOSITORY: y-asami3534/netlist-studio-releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          validation_dir="${RUNNER_TEMP}/trusted-validation-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -- "${validation_dir}"
+          node .secure-ci-cd/policy-cli.mjs validate-pipeline \
+            --root "${GITHUB_WORKSPACE}" \
+            --contract "${GITHUB_WORKSPACE}/pipeline.contract.json" \
+            --policy "${GITHUB_WORKSPACE}/channel-policy.json"
+          node .secure-ci-cd/policy-cli.mjs validate-change \
+            --github \
+            --repository "${NS_REPOSITORY}" \
+            --pr-number "${NS_PR_NUMBER}" \
+            --base-sha "${NS_BASE_SHA}" \
+            --head-sha "${NS_HEAD_SHA}" \
+            --contract "${GITHUB_WORKSPACE}/pipeline.contract.json" \
+            --policy "${GITHUB_WORKSPACE}/channel-policy.json" \
+            --output "${validation_dir}/validation.json"
+
+  publish-trusted-status:
+    name: publish-trusted-status
+    if: ${{ always() }}
+    needs:
+      - initialize-trusted-status
+      - validate-candidate-data
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the pull request base policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Select the pinned Node.js runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.18.0
+          check-latest: false
+      - name: Publish one final status for the still-current run
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          NS_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          NS_INITIALIZE_RESULT: ${{ needs.initialize-trusted-status.result }}
+          NS_PR_NUMBER: ${{ github.event.pull_request.number }}
+          NS_REPOSITORY: y-asami3534/netlist-studio-releases
+          NS_TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+          NS_VALIDATION_RESULT: ${{ needs.validate-candidate-data.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          final_state=failure
+          final_description="default branch policy validation failed"
+          if [[ "${NS_INITIALIZE_RESULT}" == "success" && "${NS_VALIDATION_RESULT}" == "success" ]]; then
+            final_state=success
+            final_description="default branch policy validation passed"
+          fi
+          node .secure-ci-cd/policy-cli.mjs verify-trusted-publication \
+            --github \
+            --repository "${NS_REPOSITORY}" \
+            --workflow-path ".github/workflows/channel-trusted-policy.yml" \
+            --pr-number "${NS_PR_NUMBER}" \
+            --base-sha "${NS_BASE_SHA}" \
+            --head-sha "${NS_HEAD_SHA}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --attempt "${GITHUB_RUN_ATTEMPT}"
+          node .secure-ci-cd/policy-cli.mjs set-status \
+            --github \
+            --repository "${NS_REPOSITORY}" \
+            --sha "${NS_HEAD_SHA}" \
+            --state "${final_state}" \
+            --context trusted-policy \
+            --description "${final_description}" \
+            --target-url "${NS_TARGET_URL}"
+          [[ "${final_state}" == "success" ]]

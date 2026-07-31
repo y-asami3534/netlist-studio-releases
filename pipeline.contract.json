@@ -1,0 +1,111 @@
+{
+  "canonical": {
+    "repository": {
+      "branch": "main",
+      "fullName": "y-asami3534/netlist-studio-releases",
+      "id": 1280945456,
+      "ownerType": "User"
+    }
+  },
+  "externalHolds": [
+    "provider-policy-readback"
+  ],
+  "kind": "netlist-studio-release-channel-pipeline",
+  "promotion": {
+    "evidenceArtifactName": "channel-data-evidence-{runId}-{attempt}-{headSha}",
+    "externalMutationHandoff": "none",
+    "requireFullSha": true,
+    "requireLatestAttempt": true,
+    "strictSemVer": true
+  },
+  "provider": "github",
+  "providerInvariants": {
+    "readbackPath": "provider-policy.readback.json",
+    "readbackRequired": true,
+    "requireCurrentBaseForMerge": true,
+    "requiredCheckNames": [
+      "channel-data",
+      "trusted-policy"
+    ],
+    "requiredWorkflowGate": {
+      "allowBypass": false,
+      "exceptionId": "personal-repository-no-required-workflow-v1",
+      "mode": "approved-personal-repository-exception",
+      "required": false
+    },
+    "strictRequiredChecks": true
+  },
+  "requiredChecks": [
+    {
+      "binding": "source-ci",
+      "job": "channel-data",
+      "name": "channel-data"
+    },
+    {
+      "binding": "trusted-policy",
+      "job": "publish-trusted-status",
+      "name": "trusted-policy"
+    }
+  ],
+  "schemaVersion": 1,
+  "toolchain": {
+    "actions": {
+      "checkout": {
+        "commitSha": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "repository": "actions/checkout",
+        "version": "v7.0.1"
+      },
+      "setupNode": {
+        "commitSha": "820762786026740c76f36085b0efc47a31fe5020",
+        "repository": "actions/setup-node",
+        "version": "v7.0.0"
+      },
+      "uploadArtifact": {
+        "commitSha": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        "repository": "actions/upload-artifact",
+        "version": "v7.0.1"
+      }
+    },
+    "minimumRunnerVersion": "2.327.1",
+    "nodeVersion": "22.18.0",
+    "runner": "ubuntu-24.04"
+  },
+  "trustZones": {
+    "manual-promotion": {
+      "allowSecrets": false,
+      "candidateMode": "git-data-only",
+      "event": "workflow_dispatch",
+      "externalMutation": false,
+      "permissions": {
+        "actions": "read",
+        "contents": "read"
+      },
+      "workflowPath": ".github/workflows/channel-promotion-evidence.yml"
+    },
+    "source-ci": {
+      "allowSecrets": false,
+      "candidateMode": "git-data-only",
+      "event": "pull_request",
+      "executesCandidate": false,
+      "permissions": {
+        "contents": "read"
+      },
+      "policySource": "pull-request-base",
+      "workflowPath": ".github/workflows/channel-source-ci.yml"
+    },
+    "trusted-policy": {
+      "allowSecrets": false,
+      "candidateMode": "git-data-only",
+      "event": "pull_request_target",
+      "executesCandidate": false,
+      "permissions": {
+        "actions": "read",
+        "contents": "read",
+        "pull-requests": "read",
+        "statuses": "write"
+      },
+      "policySource": "pull-request-base",
+      "workflowPath": ".github/workflows/channel-trusted-policy.yml"
+    }
+  }
+}

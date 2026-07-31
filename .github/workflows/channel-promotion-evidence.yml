@@ -1,0 +1,111 @@
+name: macOS stable channel promotion evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable SemVer to bind
+        required: true
+        type: string
+      base_sha:
+        description: Exact pull request base SHA
+        required: true
+        type: string
+      head_sha:
+        description: Exact pull request head SHA
+        required: true
+        type: string
+      source_run_id:
+        description: Exact source workflow run ID
+        required: true
+        type: string
+      source_attempt:
+        description: Exact source workflow run attempt
+        required: true
+        type: string
+      trusted_run_id:
+        description: Exact trusted workflow run ID
+        required: true
+        type: string
+      trusted_attempt:
+        description: Exact trusted workflow run attempt
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify-promotion:
+    name: verify-promotion
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the default branch policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Select the pinned Node.js runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.18.0
+          check-latest: false
+      - name: Verify exact current run evidence
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NS_BASE_SHA: ${{ inputs.base_sha }}
+          NS_HEAD_SHA: ${{ inputs.head_sha }}
+          NS_SOURCE_ATTEMPT: ${{ inputs.source_attempt }}
+          NS_SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          NS_TRUSTED_ATTEMPT: ${{ inputs.trusted_attempt }}
+          NS_TRUSTED_RUN_ID: ${{ inputs.trusted_run_id }}
+          NS_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="${RUNNER_TEMP}/channel-promotion-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -- "${evidence_dir}"
+          node .secure-ci-cd/policy-cli.mjs validate-pipeline \
+            --root "${GITHUB_WORKSPACE}" \
+            --contract "${GITHUB_WORKSPACE}/pipeline.contract.json" \
+            --policy "${GITHUB_WORKSPACE}/channel-policy.json"
+          node .secure-ci-cd/policy-cli.mjs verify-run-evidence \
+            --github \
+            --binding source-ci \
+            --run-id "${NS_SOURCE_RUN_ID}" \
+            --attempt "${NS_SOURCE_ATTEMPT}" \
+            --base-sha "${NS_BASE_SHA}" \
+            --head-sha "${NS_HEAD_SHA}" \
+            --version "${NS_VERSION}" \
+            --contract "${GITHUB_WORKSPACE}/pipeline.contract.json" \
+            --policy "${GITHUB_WORKSPACE}/channel-policy.json" \
+            --output "${evidence_dir}/source-run.json"
+          node .secure-ci-cd/policy-cli.mjs verify-run-evidence \
+            --github \
+            --binding trusted-policy \
+            --run-id "${NS_TRUSTED_RUN_ID}" \
+            --attempt "${NS_TRUSTED_ATTEMPT}" \
+            --base-sha "${NS_BASE_SHA}" \
+            --head-sha "${NS_HEAD_SHA}" \
+            --version "${NS_VERSION}" \
+            --contract "${GITHUB_WORKSPACE}/pipeline.contract.json" \
+            --policy "${GITHUB_WORKSPACE}/channel-policy.json" \
+            --output "${evidence_dir}/trusted-run.json"
+          node .secure-ci-cd/policy-cli.mjs write-promotion-receipt \
+            --version "${NS_VERSION}" \
+            --base-sha "${NS_BASE_SHA}" \
+            --head-sha "${NS_HEAD_SHA}" \
+            --contract "${GITHUB_WORKSPACE}/pipeline.contract.json" \
+            --policy "${GITHUB_WORKSPACE}/channel-policy.json" \
+            --source-run-receipt "${evidence_dir}/source-run.json" \
+            --trusted-run-receipt "${evidence_dir}/trusted-run.json" \
+            --output "${evidence_dir}/promotion-receipt.json"
+      - name: Publish the read-only promotion receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: channel-promotion-evidence-${{ inputs.version }}-${{ inputs.head_sha }}
+          path: ${{ runner.temp }}/channel-promotion-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 30
