@@ -1,0 +1,70 @@
+{
+  "checkSources": [
+    {
+      "attempt": 1,
+      "context": "channel-data",
+      "headSha": "04c9506007012934b6392386a951cd19c3c47bb3",
+      "integrationId": 15368,
+      "runId": 30635464118,
+      "slug": "github-actions"
+    },
+    {
+      "attempt": 1,
+      "context": "trusted-policy",
+      "headSha": "04c9506007012934b6392386a951cd19c3c47bb3",
+      "integrationId": 15368,
+      "runId": 30635463590,
+      "slug": "github-actions"
+    }
+  ],
+  "exceptionId": "personal-repository-no-required-workflow-v1",
+  "observedAt": "2026-07-31T13:44:08Z",
+  "repositoryId": 1280945456,
+  "requestSha256": "440461977bc4f36a384a24e388d11ec044d774f7fd8b83187f1e7251e3a9adcd",
+  "rulesetId": 20125661,
+  "schema": "netlist-studio.provider-policy-readback",
+  "schemaVersion": 1,
+  "target": {
+    "actions": {
+      "allowedActions": "all",
+      "enabled": true,
+      "shaPinningRequired": true
+    },
+    "branch": "main",
+    "merge": {
+      "allowAutoMerge": false,
+      "allowMergeCommit": true,
+      "allowRebaseMerge": false,
+      "allowSquashMerge": false,
+      "deleteBranchOnMerge": true
+    },
+    "ruleset": {
+      "allowBypass": false,
+      "allowDeletion": false,
+      "allowForcePush": false,
+      "conversationResolutionRequired": true,
+      "enforcement": "active",
+      "mergeMethods": [
+        "merge"
+      ],
+      "name": "protect-main",
+      "requiredApprovals": 0,
+      "requiredChecks": [
+        {
+          "context": "channel-data",
+          "integrationId": 15368
+        },
+        {
+          "context": "trusted-policy",
+          "integrationId": 15368
+        }
+      ],
+      "requiredSignatures": true,
+      "strictRequiredChecks": true
+    },
+    "workflow": {
+      "canApprovePullRequestReviews": false,
+      "defaultWorkflowPermissions": "read"
+    }
+  }
+}

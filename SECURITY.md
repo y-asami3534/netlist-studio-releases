@@ -38,3 +38,11 @@ required workflowが防ぐrunner queue開始前のwindowを完全には代替で
 `provider-policy-readback`は現在のexternal holdです。active ruleset、strict required checks、source app identity、merge-only設定、署名必須、bypass不在をAPIでread-backし、canonical receiptがdefault branchに含まれるまでstable channelのpromotionを許可しません。
 
 provider設定とread-backが一致しない場合は、古い成功runや手動判定で迂回せず`HOLD`とします。
+
+## Provider protection work unit
+
+provider保護は`main@35853bd54956f805c5e0eaf42d7943be3b9a55a2`をDirect-Baseとする独立PRで固定します。個人所有repositoryのためorganization-level required workflowを利用できない点は、`personal-repository-no-required-workflow-v1`として承認済みの残余riskです。
+
+適用前にallowlist形式のrollback snapshotをmode `0700`の外部一時directoryへ保存します。設定はmerge commitのみ、署名必須、strictな`channel-data`／`trusted-policy`、conversation resolution、bypassなし、force-push／deletion禁止、workflow token read-only、Actions full-SHA pinningを正本とします。
+
+required contextは、このPRのexact headに発行されたGitHub Actions integration identityへ束縛します。設定後はAPI read-backをcanonical receiptとして同PRへ追加し、新しいexact headで両contextが成功した場合だけ2-parent mergeします。不一致時はrollbackして`HOLD`します。
