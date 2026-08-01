@@ -164,6 +164,47 @@ function releaseTagMessage(value, manifest) {
   ].join("\n");
 }
 
+function remoteReleaseFixture({ manifest = releaseManifest(), value = binding() } = {}) {
+  const boundValue = structuredClone(value);
+  const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
+  boundValue.manifest.sha256 = createHash("sha256").update(manifestBytes).digest("hex");
+  boundValue.manifest.size = manifestBytes.length;
+  const releaseAssets = [
+    ...boundValue.assets.map((asset) => ({ browser_download_url: asset.url, digest: `sha256:${asset.sha256}`, id: asset.id, name: asset.name, size: asset.size, state: "uploaded" })),
+    { browser_download_url: `https://github.com/y-asami3534/netlist-studio-releases/releases/download/${boundValue.release.tag}/release-manifest.json`, digest: `sha256:${boundValue.manifest.sha256}`, id: boundValue.manifest.id, name: "release-manifest.json", size: boundValue.manifest.size, state: "uploaded" },
+  ];
+  const baseSha = "6".repeat(40);
+  return {
+    baseSha,
+    manifestBytes,
+    snapshot: {
+      latestReleaseId: 1,
+      release: { assets: releaseAssets, draft: false, id: boundValue.release.id, immutable: true, prerelease: false, published_at: boundValue.release.publishedAt, tag_name: boundValue.release.tag },
+      releaseManifestAssetBytes: manifestBytes,
+      taggedManifestBytes: manifestBytes,
+      tagObject: {
+        message: releaseTagMessage(boundValue, manifest),
+        object: { sha: boundValue.release.tagTarget, type: "commit" },
+        sha: boundValue.release.tagObject,
+        tag: boundValue.release.tag,
+        tagger: { email: policy.releaseTag.signingPrincipal, name: manifest.approval.releaseOwner },
+        verification: { reason: "valid", signature: releaseTagSignature, verified: true },
+      },
+      tagRef: { object: { sha: boundValue.release.tagObject, type: "tag" }, ref: `refs/tags/${boundValue.release.tag}` },
+      tagTargetAncestry: {
+        ahead_by: 1,
+        base_commit: { sha: boundValue.release.tagTarget },
+        behind_by: 0,
+        merge_base_commit: { sha: boundValue.release.tagTarget },
+        status: "ahead",
+        total_commits: 1,
+        url: `https://api.github.com/repos/y-asami3534/netlist-studio-releases/compare/${boundValue.release.tagTarget}...${baseSha}`,
+      },
+    },
+    value: boundValue,
+  };
+}
+
 function providerTarget(integrationId = 15368) {
   return {
     actions: { allowedActions: "all", enabled: true, shaPinningRequired: true },
@@ -351,13 +392,18 @@ test("initial channel accepts the exact pair and rejects metadata, URL, key, and
   const validBinding = binding();
   const bindingText = `${JSON.stringify(validBinding, null, 2)}\n`;
   const parsed = parseChannelBinding(bindingText, policy);
-  const base = snapshot({ "release-manifest.json": `${JSON.stringify(releaseManifest("0.39.23"), null, 2)}\n` });
+  const rollingManifestText = `${JSON.stringify(releaseManifest("0.40.1"), null, 2)}\n`;
+  const base = snapshot({ "release-manifest.json": rollingManifestText });
   const candidate = snapshot({
-    "release-manifest.json": `${JSON.stringify(releaseManifest(), null, 2)}\n`,
+    "release-manifest.json": rollingManifestText,
     "channels/stable/macos/arm64/channel-binding.json": bindingText,
     "channels/stable/macos/arm64/latest-mac.yml": expectedLatestMac(parsed),
   });
   assert.equal(validateStableChannelSnapshot({ base, candidate, policy }).binding.version, "0.40.0");
+
+  const changedRolling = snapshot(Object.fromEntries([...candidate.files].map(([name, bytes]) => [name, bytes.toString("utf8")] )));
+  changedRolling.files.set("release-manifest.json", Buffer.from(`${JSON.stringify(releaseManifest("0.40.0"), null, 2)}\n`));
+  assert.throws(() => validateStableChannelSnapshot({ base, candidate: changedRolling, policy }), /may not change the rolling release manifest/u);
 
   const metadataDrift = snapshot(Object.fromEntries([...candidate.files].map(([name, bytes]) => [name, bytes.toString("utf8")] )));
   metadataDrift.files.set("channels/stable/macos/arm64/latest-mac.yml", Buffer.from(`${expectedLatestMac(parsed)}extra: true\n`));
@@ -371,14 +417,51 @@ test("initial channel accepts the exact pair and rejects metadata, URL, key, and
   assert.throws(() => parseChannelBinding(`${JSON.stringify(unknown, null, 2)}\n`, policy), /keys must be exactly/u);
 
   assert.throws(() => parseChannelBinding(`${JSON.stringify(binding({ previousVersion: "0.40.0" }), null, 2)}\n`, policy), /must increase/u);
+  const aboveRolling = binding({ version: "0.40.2", previousVersion: "0.39.23" });
+  const aboveRollingParsed = parseChannelBinding(`${JSON.stringify(aboveRolling, null, 2)}\n`, policy);
+  const aboveRollingCandidate = snapshot({
+    "release-manifest.json": rollingManifestText,
+    "channels/stable/macos/arm64/channel-binding.json": `${JSON.stringify(aboveRolling, null, 2)}\n`,
+    "channels/stable/macos/arm64/latest-mac.yml": expectedLatestMac(aboveRollingParsed),
+  });
+  assert.throws(() => validateStableChannelSnapshot({ base, candidate: aboveRollingCandidate, policy }), /exceeds the rolling release manifest/u);
+
   const wrongInitial = binding({ version: "0.40.1", previousVersion: "0.39.23" });
   const wrongParsed = parseChannelBinding(`${JSON.stringify(wrongInitial, null, 2)}\n`, policy);
   const wrongCandidate = snapshot({
-    "release-manifest.json": `${JSON.stringify(releaseManifest("0.40.1"), null, 2)}\n`,
+    "release-manifest.json": rollingManifestText,
     "channels/stable/macos/arm64/channel-binding.json": `${JSON.stringify(wrongInitial, null, 2)}\n`,
     "channels/stable/macos/arm64/latest-mac.yml": expectedLatestMac(wrongParsed),
   });
   assert.throws(() => validateStableChannelSnapshot({ base, candidate: wrongCandidate, policy }), /initial stable channel version pair/u);
+});
+
+test("existing channel requires strict previousVersion continuity", () => {
+  const previous = binding();
+  const previousText = `${JSON.stringify(previous, null, 2)}\n`;
+  const next = binding({ version: "0.40.1", previousVersion: "0.40.0" });
+  const nextText = `${JSON.stringify(next, null, 2)}\n`;
+  const rollingManifestText = `${JSON.stringify(releaseManifest("0.40.1"), null, 2)}\n`;
+  const base = snapshot({
+    "release-manifest.json": rollingManifestText,
+    "channels/stable/macos/arm64/channel-binding.json": previousText,
+    "channels/stable/macos/arm64/latest-mac.yml": expectedLatestMac(parseChannelBinding(previousText, policy)),
+  });
+  const candidate = snapshot({
+    "release-manifest.json": rollingManifestText,
+    "channels/stable/macos/arm64/channel-binding.json": nextText,
+    "channels/stable/macos/arm64/latest-mac.yml": expectedLatestMac(parseChannelBinding(nextText, policy)),
+  });
+  assert.equal(validateStableChannelSnapshot({ base, candidate, policy }).binding.version, "0.40.1");
+
+  const skipped = binding({ version: "0.40.1", previousVersion: "0.39.23" });
+  const skippedText = `${JSON.stringify(skipped, null, 2)}\n`;
+  const skippedCandidate = snapshot({
+    "release-manifest.json": rollingManifestText,
+    "channels/stable/macos/arm64/channel-binding.json": skippedText,
+    "channels/stable/macos/arm64/latest-mac.yml": expectedLatestMac(parseChannelBinding(skippedText, policy)),
+  });
+  assert.throws(() => validateStableChannelSnapshot({ base, candidate: skippedCandidate, policy }), /strict continuation/u);
 });
 
 test("release manifest update must be a strict stable SemVer increase", () => {
@@ -401,38 +484,46 @@ test("provider policy remains held until canonical request and matching read-bac
   assert.throws(() => validateProviderFiles(snapshot({ "provider-policy.request.json": canonicalJson(request), "provider-policy.readback.json": canonicalJson(drifted) }), policy), /one GitHub Actions integration|does not match/u);
 });
 
-test("remote release evidence binds immutable release assets and byte-identical manifests", () => {
-  const manifest = releaseManifest();
-  const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
-  const value = binding();
-  value.manifest.sha256 = createHash("sha256").update(manifestBytes).digest("hex");
-  value.manifest.size = manifestBytes.length;
-  const releaseAssets = [
-    ...value.assets.map((asset) => ({ browser_download_url: asset.url, digest: `sha256:${asset.sha256}`, id: asset.id, name: asset.name, size: asset.size, state: "uploaded" })),
-    { browser_download_url: `https://github.com/y-asami3534/netlist-studio-releases/releases/download/v0.40.0/release-manifest.json`, digest: `sha256:${value.manifest.sha256}`, id: value.manifest.id, name: "release-manifest.json", size: value.manifest.size, state: "uploaded" },
-  ];
-  const remote = {
-    latestReleaseId: 1,
-    release: { assets: releaseAssets, draft: false, id: value.release.id, immutable: true, prerelease: false, published_at: value.release.publishedAt, tag_name: value.release.tag },
-    releaseManifestAssetBytes: manifestBytes,
-    taggedManifestBytes: manifestBytes,
-    tagObject: {
-      message: releaseTagMessage(value, manifest),
-      object: { sha: value.release.tagTarget, type: "commit" },
-      sha: value.release.tagObject,
-      tag: value.release.tag,
-      tagger: { email: policy.releaseTag.signingPrincipal, name: manifest.approval.releaseOwner },
-      verification: { reason: "valid", signature: releaseTagSignature, verified: true },
-    },
-    tagRef: { object: { sha: value.release.tagObject, type: "tag" }, ref: `refs/tags/${value.release.tag}` },
+test("remote release evidence uses the signed tag and immutable Release manifest as authority", () => {
+  const { baseSha, manifestBytes, snapshot: remote, value } = remoteReleaseFixture();
+  assert.equal(validateRemoteReleaseSnapshot({ binding: value, baseSha, policy, snapshot: remote }).releaseId, value.release.id);
+  const identicalAncestry = {
+    ...remote.tagTargetAncestry,
+    ahead_by: 0,
+    status: "identical",
+    total_commits: 0,
+    url: `https://api.github.com/repos/y-asami3534/netlist-studio-releases/compare/${value.release.tagTarget}...${value.release.tagTarget}`,
   };
-  assert.equal(validateRemoteReleaseSnapshot({ binding: value, candidateManifestBytes: manifestBytes, policy, snapshot: remote }).releaseId, value.release.id);
-  assert.throws(() => validateRemoteReleaseSnapshot({ binding: value, candidateManifestBytes: manifestBytes, policy, snapshot: { ...remote, latestReleaseId: value.release.id } }), /must not become GitHub Latest/u);
-  const unsigned = structuredClone(remote);
-  unsigned.releaseManifestAssetBytes = manifestBytes;
-  unsigned.taggedManifestBytes = manifestBytes;
-  unsigned.tagObject.verification.verified = false;
-  assert.throws(() => validateRemoteReleaseSnapshot({ binding: value, candidateManifestBytes: manifestBytes, policy, snapshot: unsigned }), /verified annotated tag/u);
+  assert.equal(validateRemoteReleaseSnapshot({ binding: value, baseSha: value.release.tagTarget, policy, snapshot: { ...remote, tagTargetAncestry: identicalAncestry } }).releaseId, value.release.id);
+  assert.throws(() => validateRemoteReleaseSnapshot({ binding: value, baseSha, policy, snapshot: { ...remote, latestReleaseId: undefined } }), /GitHub Latest release identity is unavailable/u);
+  assert.throws(() => validateRemoteReleaseSnapshot({ binding: value, baseSha, policy, snapshot: { ...remote, latestReleaseId: value.release.id } }), /must not become GitHub Latest/u);
+
+  const unsignedTag = { ...remote.tagObject, verification: { ...remote.tagObject.verification, verified: false } };
+  assert.throws(() => validateRemoteReleaseSnapshot({ binding: value, baseSha, policy, snapshot: { ...remote, tagObject: unsignedTag } }), /verified annotated tag/u);
+
+  const offMain = { ...remote.tagTargetAncestry, merge_base_commit: { sha: "7".repeat(40) }, status: "diverged" };
+  assert.throws(() => validateRemoteReleaseSnapshot({ binding: value, baseSha, policy, snapshot: { ...remote, tagTargetAncestry: offMain } }), /not contained in the current base/u);
+  const staleComparison = { ...remote.tagTargetAncestry, url: `https://api.github.com/repos/y-asami3534/netlist-studio-releases/compare/${value.release.tagTarget}...${"7".repeat(40)}` };
+  assert.throws(() => validateRemoteReleaseSnapshot({ binding: value, baseSha, policy, snapshot: { ...remote, tagTargetAncestry: staleComparison } }), /not contained in the current base/u);
+
+  assert.throws(() => validateRemoteReleaseSnapshot({ binding: value, baseSha, policy, snapshot: { ...remote, releaseManifestAssetBytes: Buffer.concat([manifestBytes, Buffer.from("\n")]) } }), /bytes differ across signed tag and Release asset/u);
+  const driftedManifestBinding = { ...value, manifest: { ...value.manifest, size: value.manifest.size + 1 } };
+  assert.throws(() => validateRemoteReleaseSnapshot({ binding: driftedManifestBinding, baseSha, policy, snapshot: remote }), /release manifest digest or size drifted/u);
+
+  const driftedReleaseAssets = remote.release.assets.map((asset, index) => index === 0 ? { ...asset, size: asset.size + 1 } : asset);
+  assert.throws(() => validateRemoteReleaseSnapshot({ binding: value, baseSha, policy, snapshot: { ...remote, release: { ...remote.release, assets: driftedReleaseAssets } } }), /GitHub Release asset drifted/u);
+});
+
+test("signed release manifest must match channel source and artifact identities", () => {
+  const sourceManifest = releaseManifest();
+  sourceManifest.source.commit = "9".repeat(40);
+  const sourceFixture = remoteReleaseFixture({ manifest: sourceManifest });
+  assert.throws(() => validateRemoteReleaseSnapshot({ binding: sourceFixture.value, baseSha: sourceFixture.baseSha, policy, snapshot: sourceFixture.snapshot }), /channel source does not match/u);
+
+  const artifactManifest = releaseManifest();
+  artifactManifest.artifacts[0].sha256 = "f".repeat(64);
+  const artifactFixture = remoteReleaseFixture({ manifest: artifactManifest });
+  assert.throws(() => validateRemoteReleaseSnapshot({ binding: artifactFixture.value, baseSha: artifactFixture.baseSha, policy, snapshot: artifactFixture.snapshot }), /channel asset does not match/u);
 });
 
 test("trusted publication performs fresh verification before and after one status POST", async () => {

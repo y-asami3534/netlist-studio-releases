@@ -676,17 +676,12 @@ export function validateStableChannelSnapshot({ base, candidate, policy }) {
   if (metadataBytes.length > policy.limits.latestMacBytes) throw new PolicyViolation("latest-mac.yml is oversized");
   const binding = parseChannelBinding(bindingBytes.toString("utf8"), policy);
   if (metadataBytes.toString("utf8") !== expectedLatestMac(binding)) throw new PolicyViolation("latest-mac.yml does not exactly match channel binding");
-  const manifestBytes = candidate.files.get("release-manifest.json");
-  if (!manifestBytes) throw new PolicyViolation("release manifest is missing");
+  const manifestBytes = base.files.get("release-manifest.json");
+  const candidateManifestBytes = candidate.files.get("release-manifest.json");
+  if (!manifestBytes || !candidateManifestBytes) throw new PolicyViolation("rolling release manifest is missing");
+  if (!manifestBytes.equals(candidateManifestBytes)) throw new PolicyViolation("stable channel update may not change the rolling release manifest");
   const manifest = parseReleaseManifest(manifestBytes.toString("utf8"), policy);
-  if (manifest.version !== binding.version || manifest.source.repository !== binding.source.repository || manifest.source.commit !== binding.source.commit || manifest.source.tag !== binding.source.tag || manifest.source.tagObject !== binding.source.tagObject) {
-    throw new PolicyViolation("channel source does not match release manifest");
-  }
-  const artifacts = new Map(manifest.artifacts.map((artifact) => [artifact.name, artifact]));
-  for (const asset of binding.assets) {
-    const manifestArtifact = artifacts.get(asset.name);
-    if (!manifestArtifact || manifestArtifact.sha256 !== asset.sha256 || manifestArtifact.size !== asset.size) throw new PolicyViolation(`channel asset does not match release manifest: ${asset.name}`);
-  }
+  if (compareVersions(binding.version, manifest.version) > 0) throw new PolicyViolation("stable channel version exceeds the rolling release manifest");
   const baseBinding = base.files.get(bindingPath);
   const baseMetadata = base.files.get(metadataPath);
   if (Boolean(baseBinding) !== Boolean(baseMetadata)) throw new PolicyViolation("base stable channel is incomplete");
@@ -899,16 +894,43 @@ function validateVerifiedReleaseTag(tag, binding, manifest, policy) {
   if (typeof tag.message !== "string" || !tag.message.startsWith(signedMessage) || tag.message.slice(signedMessage.length).trimEnd() !== signature.trimEnd()) throw new PolicyViolation("release tag signed message drifted");
 }
 
-export function validateRemoteReleaseSnapshot({ binding, candidateManifestBytes, policy, snapshot }) {
-  if (!Buffer.isBuffer(candidateManifestBytes)) throw new EvidenceUnavailable("candidate release manifest bytes are unavailable");
+function validateChannelManifestBinding(manifest, binding) {
+  if (manifest.version !== binding.version || manifest.source.repository !== binding.source.repository || manifest.source.commit !== binding.source.commit || manifest.source.tag !== binding.source.tag || manifest.source.tagObject !== binding.source.tagObject) {
+    throw new PolicyViolation("channel source does not match the signed release manifest");
+  }
+  const artifacts = new Map(manifest.artifacts.map((artifact) => [artifact.name, artifact]));
+  for (const asset of binding.assets) {
+    const manifestArtifact = artifacts.get(asset.name);
+    if (!manifestArtifact || manifestArtifact.sha256 !== asset.sha256 || manifestArtifact.size !== asset.size) throw new PolicyViolation(`channel asset does not match the signed release manifest: ${asset.name}`);
+  }
+}
+
+function validateTagTargetAncestry(snapshot, binding, baseSha, policy) {
+  requirePattern(baseSha, FULL_SHA, "current base SHA");
+  const ancestry = snapshot?.tagTargetAncestry;
+  const expectedUrl = `https://api.github.com/repos/${policy.repositories.release.fullName}/compare/${binding.release.tagTarget}...${baseSha}`;
+  const identical = ancestry?.status === "identical" && baseSha === binding.release.tagTarget && ancestry?.ahead_by === 0 && ancestry?.total_commits === 0;
+  const ahead = ancestry?.status === "ahead" && baseSha !== binding.release.tagTarget && Number.isSafeInteger(ancestry?.ahead_by) && ancestry.ahead_by > 0 && Number.isSafeInteger(ancestry?.total_commits) && ancestry.total_commits > 0;
+  if (ancestry?.url !== expectedUrl || ancestry?.base_commit?.sha !== binding.release.tagTarget || ancestry?.merge_base_commit?.sha !== binding.release.tagTarget || ancestry?.behind_by !== 0 || (!identical && !ahead)) {
+    throw new PolicyViolation("release tag target is not contained in the current base");
+  }
+}
+
+export function validateRemoteReleaseSnapshot({ binding, baseSha, policy, snapshot }) {
   const release = snapshot?.release;
   if (release?.id !== binding.release.id || release?.tag_name !== binding.release.tag || release?.draft !== false || release?.prerelease !== false || release?.immutable !== true || release?.published_at !== binding.release.publishedAt) throw new PolicyViolation("GitHub Release identity or immutable flags drifted");
+  if (!Number.isSafeInteger(snapshot?.latestReleaseId) || snapshot.latestReleaseId <= 0) throw new EvidenceUnavailable("GitHub Latest release identity is unavailable");
   if (snapshot?.latestReleaseId === binding.release.id) throw new PolicyViolation("stable channel release must not become GitHub Latest");
   if (snapshot?.tagRef?.ref !== `refs/tags/${binding.release.tag}` || snapshot?.tagRef?.object?.type !== "tag" || snapshot?.tagRef?.object?.sha !== binding.release.tagObject) throw new PolicyViolation("release tag ref drifted");
   const tag = snapshot?.tagObject;
   if (tag?.sha !== binding.release.tagObject || tag?.tag !== binding.release.tag || tag?.object?.type !== "commit" || tag?.object?.sha !== binding.release.tagTarget || tag?.verification?.verified !== true || tag?.verification?.reason !== "valid") throw new PolicyViolation("release tag object is not the exact verified annotated tag");
+  validateTagTargetAncestry(snapshot, binding, baseSha, policy);
 
-  const manifest = parseReleaseManifest(candidateManifestBytes.toString("utf8"), policy);
+  if (!Buffer.isBuffer(snapshot.taggedManifestBytes) || !Buffer.isBuffer(snapshot.releaseManifestAssetBytes)) throw new EvidenceUnavailable("release manifest byte evidence is unavailable");
+  if (!snapshot.taggedManifestBytes.equals(snapshot.releaseManifestAssetBytes)) throw new PolicyViolation("release manifest bytes differ across signed tag and Release asset");
+  if (snapshot.taggedManifestBytes.length !== binding.manifest.size || createHash("sha256").update(snapshot.taggedManifestBytes).digest("hex") !== binding.manifest.sha256) throw new PolicyViolation("release manifest digest or size drifted");
+  const manifest = parseReleaseManifest(snapshot.taggedManifestBytes.toString("utf8"), policy);
+  validateChannelManifestBinding(manifest, binding);
   validateVerifiedReleaseTag(tag, binding, manifest, policy);
   const prefix = `https://github.com/${policy.repositories.release.fullName}/releases/download/${binding.release.tag}/`;
   const expected = [
@@ -922,33 +944,33 @@ export function validateRemoteReleaseSnapshot({ binding, candidateManifestBytes,
     const actual = byName.get(asset.name);
     normalizeReleaseAsset(actual, asset);
   }
-  if (!Buffer.isBuffer(snapshot.taggedManifestBytes) || !Buffer.isBuffer(snapshot.releaseManifestAssetBytes)) throw new EvidenceUnavailable("release manifest byte evidence is unavailable");
-  if (!candidateManifestBytes.equals(snapshot.taggedManifestBytes) || !candidateManifestBytes.equals(snapshot.releaseManifestAssetBytes)) throw new PolicyViolation("release manifest bytes differ across candidate, signed tag, and Release asset");
-  if (candidateManifestBytes.length !== binding.manifest.size || createHash("sha256").update(candidateManifestBytes).digest("hex") !== binding.manifest.sha256) throw new PolicyViolation("release manifest digest or size drifted");
   return Object.freeze({ releaseId: release.id, tagObject: tag.sha, tagTarget: tag.object.sha });
 }
 
-export async function collectRemoteReleaseEvidence({ binding, candidateManifestBytes, policy }) {
+export async function collectRemoteReleaseEvidence({ binding, baseSha, policy }) {
+  requirePattern(baseSha, FULL_SHA, "current base SHA");
   const repository = policy.repositories.release.fullName.split("/").map(encodeURIComponent).join("/");
   const tagName = encodeURIComponent(binding.release.tag);
-  const [release, latest, tagRef, tagObject, taggedManifest] = await Promise.all([
+  const [release, latest, tagRef, tagObject, taggedManifest, tagTargetAncestry] = await Promise.all([
     githubRequest(`/repos/${repository}/releases/tags/${tagName}`),
     githubRequest(`/repos/${repository}/releases/latest`),
     githubRequest(`/repos/${repository}/git/ref/tags/${tagName}`),
     githubRequest(`/repos/${repository}/git/tags/${binding.release.tagObject}`),
     githubRequest(`/repos/${repository}/contents/release-manifest.json?ref=${encodeURIComponent(binding.release.tagTarget)}`),
+    githubRequest(`/repos/${repository}/compare/${encodeURIComponent(binding.release.tagTarget)}...${encodeURIComponent(baseSha)}`),
   ]);
   const manifestAsset = Array.isArray(release?.assets) ? release.assets.find((asset) => asset.name === binding.manifest.name && asset.id === binding.manifest.id) : null;
   if (!manifestAsset) throw new PolicyViolation("release manifest asset identity drifted");
   const releaseManifestAssetBytes = await fetchPublicAsset(manifestAsset.browser_download_url, policy.limits.maximumFileBytes);
   return validateRemoteReleaseSnapshot({
     binding,
-    candidateManifestBytes,
+    baseSha,
     policy,
     snapshot: {
       latestReleaseId: latest?.id,
       release,
       releaseManifestAssetBytes,
+      tagTargetAncestry,
       taggedManifestBytes: decodeContentsFile(taggedManifest, "release-manifest.json", policy.limits.maximumFileBytes),
       tagObject,
       tagRef,
@@ -991,7 +1013,7 @@ export async function collectGithubChange({ repository, prNumber, baseSha, headS
   ]);
   const result = await validateChange({ base, candidate, baseSha, contract, policy });
   if (result.classification === "stable-channel") {
-    await collectRemoteReleaseEvidence({ binding: result.details.binding, candidateManifestBytes: candidate.files.get("release-manifest.json"), policy });
+    await collectRemoteReleaseEvidence({ binding: result.details.binding, baseSha, policy });
   }
   return result;
 }

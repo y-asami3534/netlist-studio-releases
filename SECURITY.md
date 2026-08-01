@@ -10,6 +10,12 @@ stable channelの変更は、次の3つの信頼境界を分離します。
 
 candidate側のworkflow、script、package、hookはtrusted zoneで実行しません。required contextは`channel-data`と`trusted-policy`の2件です。
 
+## Stable channel release authority
+
+rolling `main/release-manifest.json`は、stable channelへ昇格できるversionの上限として扱います。channel targetとrolling manifestの完全一致は要求しません。これにより、rolling manifestが先行していても、初期versionから順番にchannelを構築できます。
+
+各targetのrelease authorityは、署名済みannotated tagが指すcommit上の`release-manifest.json`と、immutable GitHub Releaseの同名assetがbyte一致する組です。validatorはtag targetがcurrent PR baseに含まれること、tag署名、Release identity、bindingの`makeLatest=false`宣言、対象が現在のGitHub Latestではないこと、manifest digest／size、source identity、ZIP／DMGのSHA-256 digest／sizeをfreshに検証します。base channelからの`previousVersion`連続性とversionのstrict increaseを維持し、rolling manifestを超えるversion、off-main tag、asset driftはfail-closedで拒否します。
+
 ## Approved personal-repository exception
 
 GitHubのprovider-native required workflowはOrganizationまたはEnterprise所有repositoryでのみ利用できるため、個人所有の本repositoryでは次の例外を明示的に適用します。
