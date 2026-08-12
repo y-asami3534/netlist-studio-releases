@@ -14,7 +14,9 @@ candidate側のworkflow、script、package、hookはtrusted zoneで実行しま�
 
 rolling `main/release-manifest.json`は、stable channelへ昇格できるversionの上限として扱います。channel targetとrolling manifestの完全一致は要求しません。これにより、rolling manifestが先行していても、初期versionから順番にchannelを構築できます。
 
-各targetのrelease authorityは、署名済みannotated tagが指すcommit上の`release-manifest.json`と、immutable GitHub Releaseの同名assetがbyte一致する組です。validatorはtag targetがcurrent PR baseに含まれること、tag署名、Release identity、bindingの`makeLatest=false`宣言、対象が現在のGitHub Latestではないこと、manifest digest／size、source identity、ZIP／DMGのSHA-256 digest／sizeをfreshに検証します。base channelからの`previousVersion`連続性とversionのstrict increaseを維持し、rolling manifestを超えるversion、off-main tag、asset driftはfail-closedで拒否します。
+各targetのrelease authorityは、署名済みannotated tagが指すcommit上の`release-manifest.json`と、immutable GitHub Releaseの同名assetがbyte一致する組です。validatorはtag targetがcurrent PR baseに含まれること、tag署名、Release identity、bindingの`makeLatest=false`宣言、manifest digest／size、source identity、ZIP／DMGのSHA-256 digest／sizeをfreshに検証します。`makeLatest=false`はinitial publication時の事実として保持し、後日のmutableなGitHub Latest pointerとは分離します。Latest identityは利用可能でなければなりませんが、stable targetと一致しても異なってもchannel合否に使用しません。base channelからの`previousVersion`連続性とversionのstrict increaseを維持し、rolling manifestを超えるversion、off-main tag、asset driftはfail-closedで拒否します。
+
+stable channelのauthorityはraw `channel-binding.json`／`latest-mac.yml`であり、GitHub Latestではありません。後日の別承認operationでLatestをstable targetへ一致させても、Release immutability、signed tag、manifest、exact asset set、channel continuityの検査を弱めません。legacy `releases/latest/download/latest.yml`が404になる場合はWindows auto-update非対応というaccepted limitationとして記録し、macOS stable channelの失敗へ読み替えません。
 
 ## Approved personal-repository exception
 

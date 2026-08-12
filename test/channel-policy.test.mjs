@@ -496,7 +496,10 @@ test("remote release evidence uses the signed tag and immutable Release manifest
   };
   assert.equal(validateRemoteReleaseSnapshot({ binding: value, baseSha: value.release.tagTarget, policy, snapshot: { ...remote, tagTargetAncestry: identicalAncestry } }).releaseId, value.release.id);
   assert.throws(() => validateRemoteReleaseSnapshot({ binding: value, baseSha, policy, snapshot: { ...remote, latestReleaseId: undefined } }), /GitHub Latest release identity is unavailable/u);
-  assert.throws(() => validateRemoteReleaseSnapshot({ binding: value, baseSha, policy, snapshot: { ...remote, latestReleaseId: value.release.id } }), /must not become GitHub Latest/u);
+  assert.equal(validateRemoteReleaseSnapshot({ binding: value, baseSha, policy, snapshot: { ...remote, latestReleaseId: value.release.id } }).releaseId, value.release.id);
+
+  const makeLatestBinding = { ...value, release: { ...value.release, makeLatest: true } };
+  assert.throws(() => parseChannelBinding(`${JSON.stringify(makeLatestBinding, null, 2)}\n`, policy), /channel release flags are invalid/u);
 
   const unsignedTag = { ...remote.tagObject, verification: { ...remote.tagObject.verification, verified: false } };
   assert.throws(() => validateRemoteReleaseSnapshot({ binding: value, baseSha, policy, snapshot: { ...remote, tagObject: unsignedTag } }), /verified annotated tag/u);

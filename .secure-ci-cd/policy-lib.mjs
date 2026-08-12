@@ -920,7 +920,6 @@ export function validateRemoteReleaseSnapshot({ binding, baseSha, policy, snapsh
   const release = snapshot?.release;
   if (release?.id !== binding.release.id || release?.tag_name !== binding.release.tag || release?.draft !== false || release?.prerelease !== false || release?.immutable !== true || release?.published_at !== binding.release.publishedAt) throw new PolicyViolation("GitHub Release identity or immutable flags drifted");
   if (!Number.isSafeInteger(snapshot?.latestReleaseId) || snapshot.latestReleaseId <= 0) throw new EvidenceUnavailable("GitHub Latest release identity is unavailable");
-  if (snapshot?.latestReleaseId === binding.release.id) throw new PolicyViolation("stable channel release must not become GitHub Latest");
   if (snapshot?.tagRef?.ref !== `refs/tags/${binding.release.tag}` || snapshot?.tagRef?.object?.type !== "tag" || snapshot?.tagRef?.object?.sha !== binding.release.tagObject) throw new PolicyViolation("release tag ref drifted");
   const tag = snapshot?.tagObject;
   if (tag?.sha !== binding.release.tagObject || tag?.tag !== binding.release.tag || tag?.object?.type !== "commit" || tag?.object?.sha !== binding.release.tagTarget || tag?.verification?.verified !== true || tag?.verification?.reason !== "valid") throw new PolicyViolation("release tag object is not the exact verified annotated tag");
