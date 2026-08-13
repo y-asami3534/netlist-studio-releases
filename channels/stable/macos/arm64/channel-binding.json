@@ -4,47 +4,47 @@
   "channel": "stable",
   "platform": "macos",
   "arch": "arm64",
-  "version": "0.41.1",
-  "previousVersion": "0.41.0",
+  "version": "0.42.0",
+  "previousVersion": "0.41.1",
   "source": {
     "repository": "y-asami3534/netlist-studio",
-    "commit": "efe8308423aaf8f781c6f295905d4d60142c3654",
-    "tag": "v0.41.1",
-    "tagObject": "cb633ab3d7bd78c2234600550e269bfdb4ba1f49"
+    "commit": "9d2f2d4be24de5b990520fcfbcc465e58581c4a8",
+    "tag": "v0.42.0",
+    "tagObject": "27ef724e5e704c07eca613091db93e8d9d415b5a"
   },
   "release": {
     "repository": "y-asami3534/netlist-studio-releases",
-    "id": 368758593,
-    "tag": "v0.41.1",
-    "tagObject": "9453f6a941a3fa155689f4a0e74175515323a3c4",
-    "tagTarget": "128230fdf3352e3ac75273eea773c482c2158d83",
+    "id": 369737896,
+    "tag": "v0.42.0",
+    "tagObject": "fa98206eb3711c07c2f43832c6b9d9aceb79c7b1",
+    "tagTarget": "0e2e26d31f25dfd1b724ff1885e22cd310d8dd65",
     "immutable": true,
     "prerelease": false,
     "makeLatest": false,
-    "publishedAt": "2026-08-12T00:51:15Z"
+    "publishedAt": "2026-08-13T07:40:01Z"
   },
   "manifest": {
     "name": "release-manifest.json",
-    "id": 510465291,
-    "sha256": "37f8b1f9589d17eb7808098604d61d39e34f615d783701f486db7932bece0773",
+    "id": 512662439,
+    "sha256": "d5fdc1d1696a755b56790d4588c17b07cdf32e783568150015b3c438167dc725",
     "size": 1405
   },
   "assets": [
     {
-      "name": "Netlist-Studio-0.41.1-arm64.zip",
-      "id": 510464964,
-      "sha256": "4632bfa39390f5d5e2d573a417d8d2b859d50899220cc0292c2bda259925f00b",
-      "sha512": "RrvhzII0aDPWBja5vLhP5DykUPruFViVE2RyP9jxrRYLKcj7MT2904au7iMvEX2mGmA3s/Da7QZMojoSi14Ycw==",
-      "size": 177286181,
-      "url": "https://github.com/y-asami3534/netlist-studio-releases/releases/download/v0.41.1/Netlist-Studio-0.41.1-arm64.zip"
+      "name": "Netlist-Studio-0.42.0-arm64.zip",
+      "id": 512662086,
+      "sha256": "53b44988d7afd0c7f26382229fb863539c1b9153140a188d40f7ebdcfdb38adc",
+      "sha512": "7MlYCH9vZmhhhU/5tj/qRNV6QegdPOi2YKxuYwJLF0LzjrpNynUtxYVaivhE/3eYrD6BqSpgGnAfzIq6r+XPOQ==",
+      "size": 177352729,
+      "url": "https://github.com/y-asami3534/netlist-studio-releases/releases/download/v0.42.0/Netlist-Studio-0.42.0-arm64.zip"
     },
     {
-      "name": "Netlist-Studio-0.41.1-arm64.dmg",
-      "id": 510464713,
-      "sha256": "d5c1c2a5caaf58099a727cde768bfc65447080a7c91ef653fbb5af62e4d145e7",
-      "sha512": "TUYSncS2VE6yZ7eeEsnZ5Y0d/xKAkjC5Q4yHn5sMLehvo/VyyDm8XFXM515kLVMLogRS1iNFH0UviMxuXG6lUQ==",
-      "size": 183812587,
-      "url": "https://github.com/y-asami3534/netlist-studio-releases/releases/download/v0.41.1/Netlist-Studio-0.41.1-arm64.dmg"
+      "name": "Netlist-Studio-0.42.0-arm64.dmg",
+      "id": 512661617,
+      "sha256": "da951ff39f6caa6bbb1d0550a9b5d5a8c5490c74873fc7caa2d166166229e8b4",
+      "sha512": "Nn+4zbN4sE2unsy+LfkBbd2Z1prD7dXzdQdh7fo3/biT0Brr/+cHyQEU2FB1CJn6868ZukFrK++emoRES+Nv9g==",
+      "size": 183875037,
+      "url": "https://github.com/y-asami3534/netlist-studio-releases/releases/download/v0.42.0/Netlist-Studio-0.42.0-arm64.dmg"
     }
   ]
 }
