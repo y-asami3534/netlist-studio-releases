@@ -1,11 +1,11 @@
-version: 0.43.0
+version: 0.43.1
 files:
-  - url: https://github.com/y-asami3534/netlist-studio-releases/releases/download/v0.43.0/Netlist-Studio-0.43.0-arm64.zip
-    sha512: dXNGS7UXK50M0Y1ZkfIUfXpNYNH2ihl79pQ1+TUHRgQMnxXgQLoir9ar1oFt6YqjMUoZPfG5jACeA/kTiOA8Og==
-    size: 173969330
-  - url: https://github.com/y-asami3534/netlist-studio-releases/releases/download/v0.43.0/Netlist-Studio-0.43.0-arm64.dmg
-    sha512: XkBoIgN/gKm3JED9HEn5AUa3xAL+rQr7l/QKQTUGzoTdnv9lfK3yIHsqL1QPkDcQHllWW5nLVlDOfzpT6xOmBg==
-    size: 180486787
-path: https://github.com/y-asami3534/netlist-studio-releases/releases/download/v0.43.0/Netlist-Studio-0.43.0-arm64.zip
-sha512: dXNGS7UXK50M0Y1ZkfIUfXpNYNH2ihl79pQ1+TUHRgQMnxXgQLoir9ar1oFt6YqjMUoZPfG5jACeA/kTiOA8Og==
-releaseDate: '2026-08-27T02:46:56.000Z'
+  - url: https://github.com/y-asami3534/netlist-studio-releases/releases/download/v0.43.1/Netlist-Studio-0.43.1-arm64.zip
+    sha512: wmpqw3aIC/Z5Rzpatzjp6jHiidEnT+iAYSFscYa/SPNVlnVcE6aONq1ED9xaONiAy7C/p7rh2lC/TFOiIuA4Qw==
+    size: 175201384
+  - url: https://github.com/y-asami3534/netlist-studio-releases/releases/download/v0.43.1/Netlist-Studio-0.43.1-arm64.dmg
+    sha512: 6AOoT+MlrWOfb8AQx57ogf/PRngFrZ5PIm5/PvW/lIxNaKB/zH/Viur0Cy1iYKN7XUdlUaHt+9Thyc16NOsIJQ==
+    size: 181718035
+path: https://github.com/y-asami3534/netlist-studio-releases/releases/download/v0.43.1/Netlist-Studio-0.43.1-arm64.zip
+sha512: wmpqw3aIC/Z5Rzpatzjp6jHiidEnT+iAYSFscYa/SPNVlnVcE6aONq1ED9xaONiAy7C/p7rh2lC/TFOiIuA4Qw==
+releaseDate: '2026-10-06T14:04:13.000Z'
