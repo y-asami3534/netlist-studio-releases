@@ -616,7 +616,7 @@ export function parseChannelBinding(text, policy) {
   requireString(value.release.tag, `v${value.version}`, "channel release tag");
   requirePattern(value.release.tagObject, OBJECT_ID, "channel release tag object");
   requirePattern(value.release.tagTarget, OBJECT_ID, "channel release tag target");
-  if (value.release.immutable !== true || value.release.prerelease !== false || value.release.makeLatest !== false) throw new PolicyViolation("channel release flags are invalid");
+  if (value.release.immutable !== true || value.release.prerelease !== false || typeof value.release.makeLatest !== "boolean") throw new PolicyViolation("channel release flags are invalid");
   requirePattern(value.release.publishedAt, UTC_SECONDS, "channel release publishedAt");
   if (Number.isNaN(Date.parse(value.release.publishedAt))) throw new PolicyViolation("channel release publishedAt is invalid");
   exactKeys(value.manifest, ["id", "name", "sha256", "size"], "channel manifest");
@@ -640,7 +640,7 @@ export function parseChannelBinding(text, policy) {
     version: value.version,
     previousVersion: value.previousVersion,
     source: { repository: value.source.repository, commit: value.source.commit, tag: value.source.tag, tagObject: value.source.tagObject },
-    release: { repository: value.release.repository, id: value.release.id, tag: value.release.tag, tagObject: value.release.tagObject, tagTarget: value.release.tagTarget, immutable: true, prerelease: false, makeLatest: false, publishedAt: value.release.publishedAt },
+    release: { repository: value.release.repository, id: value.release.id, tag: value.release.tag, tagObject: value.release.tagObject, tagTarget: value.release.tagTarget, immutable: true, prerelease: false, makeLatest: value.release.makeLatest, publishedAt: value.release.publishedAt },
     manifest: { name: value.manifest.name, id: value.manifest.id, sha256: value.manifest.sha256, size: value.manifest.size },
     assets: [zip, dmg],
   };

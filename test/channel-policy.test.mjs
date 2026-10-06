@@ -498,9 +498,6 @@ test("remote release evidence uses the signed tag and immutable Release manifest
   assert.throws(() => validateRemoteReleaseSnapshot({ binding: value, baseSha, policy, snapshot: { ...remote, latestReleaseId: undefined } }), /GitHub Latest release identity is unavailable/u);
   assert.equal(validateRemoteReleaseSnapshot({ binding: value, baseSha, policy, snapshot: { ...remote, latestReleaseId: value.release.id } }).releaseId, value.release.id);
 
-  const makeLatestBinding = { ...value, release: { ...value.release, makeLatest: true } };
-  assert.throws(() => parseChannelBinding(`${JSON.stringify(makeLatestBinding, null, 2)}\n`, policy), /channel release flags are invalid/u);
-
   const unsignedTag = { ...remote.tagObject, verification: { ...remote.tagObject.verification, verified: false } };
   assert.throws(() => validateRemoteReleaseSnapshot({ binding: value, baseSha, policy, snapshot: { ...remote, tagObject: unsignedTag } }), /verified annotated tag/u);
 
@@ -515,6 +512,29 @@ test("remote release evidence uses the signed tag and immutable Release manifest
 
   const driftedReleaseAssets = remote.release.assets.map((asset, index) => index === 0 ? { ...asset, size: asset.size + 1 } : asset);
   assert.throws(() => validateRemoteReleaseSnapshot({ binding: value, baseSha, policy, snapshot: { ...remote, release: { ...remote.release, assets: driftedReleaseAssets } } }), /GitHub Release asset drifted/u);
+});
+
+test("channel publication intent preserves both boolean makeLatest values", () => {
+  const { baseSha, snapshot: remote, value } = remoteReleaseFixture();
+  for (const makeLatest of [false, true]) {
+    const changed = { ...value, release: { ...value.release, makeLatest } };
+    const parsed = parseChannelBinding(`${JSON.stringify(changed, null, 2)}\n`, policy);
+    assert.equal(parsed.release.makeLatest, makeLatest);
+    for (const latestReleaseId of [remote.latestReleaseId, value.release.id]) {
+      assert.equal(validateRemoteReleaseSnapshot({ binding: parsed, baseSha, policy, snapshot: { ...remote, latestReleaseId } }).releaseId, value.release.id);
+    }
+  }
+  for (const makeLatest of [undefined, null, 0, 1, "false", "true", [], {}]) {
+    const changed = { ...value, release: { ...value.release, makeLatest } };
+    assert.throws(() => parseChannelBinding(`${JSON.stringify(changed, null, 2)}\n`, policy), /channel release/u);
+  }
+  const makeLatestBinding = { ...value, release: { ...value.release, makeLatest: true } };
+  for (const flags of [{ immutable: false }, { prerelease: true }]) {
+    const changed = { ...makeLatestBinding, release: { ...makeLatestBinding.release, ...flags } };
+    assert.throws(() => parseChannelBinding(`${JSON.stringify(changed, null, 2)}\n`, policy), /channel release flags are invalid/u);
+  }
+  const unsignedTag = { ...remote.tagObject, verification: { ...remote.tagObject.verification, verified: false } };
+  assert.throws(() => validateRemoteReleaseSnapshot({ binding: makeLatestBinding, baseSha, policy, snapshot: { ...remote, tagObject: unsignedTag } }), /verified annotated tag/u);
 });
 
 test("signed release manifest must match channel source and artifact identities", () => {
